@@ -1,6 +1,6 @@
-# QuotaOffice · 模型额度桌面小组件
+# PixelCrew · 像素小分队
 
-Windows 桌面悬浮小组件：实时监控 **Codex** 与 **Kimi Code** 额度，并把任务与子代理状态变成一座会动的**像素办公室**。
+Windows 桌面悬浮小组件：把你的 AI 子代理变成一座会动的**像素办公室**——谁在打字、谁在摸鱼、谁卡 Bug，一目了然；同时监控 **Codex** 与 **Kimi Code** 额度。
 
 ![组件截图](docs/screenshot.png)
 
