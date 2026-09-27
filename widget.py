@@ -450,6 +450,19 @@ class RoundedWindow(tk.Canvas):
         self.tag_lower("chrome")
 
 
+def _scroll_ease(t: float) -> float:
+    """卷轴感缓动：先快后慢再顿一下。
+
+    前 70% 时间走完 88% 行程（cubic 缓出，像卷轴被一把拉开），
+    后 30% 时间缓缓收拢最后 12%（像卷轴到位前轻轻一顿）。
+    """
+    if t < 0.7:
+        u = t / 0.7
+        return 0.88 * (1 - (1 - u) ** 3)
+    u = (t - 0.7) / 0.3
+    return 0.88 + 0.12 * (1 - (1 - u) ** 2)
+
+
 class Widget:
     BG = "#16191e"
     CARD = "#20242b"
@@ -713,7 +726,7 @@ class Widget:
         self.world_button.configure(text="收起画卷" if expanded else "展开画卷")
         origin, target = self.world_progress, float(expanded)
         started = time.monotonic()
-        duration = max(0.10, 0.42 * abs(target - origin))
+        duration = max(0.10, 0.46 * abs(target - origin))
         # 顶层窗口一次定型：展开先开到最终尺寸（两翼透明不可见），
         # 收起保持当前尺寸到动画结束；逐帧只动画布，避免窗口 resize 撕裂。
         self._layout_world(apply_window=True,
@@ -724,8 +737,7 @@ class Widget:
             if self.closing or self.collapsed:
                 return
             t = min(1.0, (time.monotonic() - started) / duration)
-            ease = 1 - (1 - t) ** 3
-            self.world_progress = origin + (target - origin) * ease
+            self.world_progress = origin + (target - origin) * _scroll_ease(t)
             self._layout_world(apply_window=False)
             if t < 1:
                 self.world_animation = self.root.after(16, step)
