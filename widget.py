@@ -238,6 +238,119 @@ def rel_time(ts: float) -> str:
     return f"{int(delta // 86400)} 天前活跃"
 
 
+# ---------------------------------------------------------------------------
+# 像素小动画（灵感来自 Star-Office-UI：状态驱动动画，AI 干什么就演什么）
+# ---------------------------------------------------------------------------
+
+AGENT_OPEN = (
+    "............",
+    "...KKKKKK...",
+    "..KCCCCCCK..",
+    ".KCWWKKWWCK.",
+    ".KCCCCCCCCK.",
+    ".KCCCCCCCCK.",
+    "..KCCCCCCK..",
+    "...KKKKKK...",
+    "...K.K.K....",
+    "...K.K.K....",
+    "............",
+    "............",
+)
+
+AGENT_ARMS_UP = AGENT_OPEN[:4] + ("KKCCCCCCCCKK",) + AGENT_OPEN[5:]
+
+AGENT_CLOSED = AGENT_OPEN[:3] + (".KCKKKKKKCK.",) + AGENT_OPEN[4:]
+
+DOC = (
+    "............",
+    "..KKKKKKKK..",
+    ".KDDDDDDDDK.",
+    ".KDLLLLDDDK.",
+    ".KDDDDDDDDK.",
+    ".KDLLLLLLDK.",
+    ".KDDDDDDDDK.",
+    ".KDLLLDDDDK.",
+    ".KDDDDDDDDK.",
+    ".KDDDDDDDDK.",
+    "..KKKKKKKK..",
+    "............",
+)
+
+
+def doc_frames(lines: int) -> tuple:
+    """只有前 lines 行有文字的文档帧。"""
+    grid = list(DOC)
+    for i, r in enumerate((3, 5, 7)):
+        if i >= lines:
+            grid[r] = ".KDDDDDDDDK."
+    return tuple(grid)
+
+
+def agent_frames(state: str) -> list:
+    """子代理状态 → 帧序列 (grid, dx, dy, 头顶文字)。"""
+    if state == "active":  # 干活中：举手打字 + 身体起伏
+        return [(AGENT_ARMS_UP, 0, 0, ""), (AGENT_OPEN, 0, 1, "")]
+    if state == "notLoaded":  # 休息中：闭眼 + Zzz 飘出
+        return [(AGENT_CLOSED, 0, 0, ""), (AGENT_CLOSED, 0, 0, "z"),
+                (AGENT_CLOSED, 0, 0, "z Z"), (AGENT_CLOSED, 0, 0, "z Z z")]
+    if state == "systemError":  # 异常：左右摇晃 + 感叹号闪烁
+        return [(AGENT_OPEN, -1, 0, "!"), (AGENT_OPEN, 1, 0, ""),
+                (AGENT_OPEN, -1, 0, "!"), (AGENT_OPEN, 1, 0, "")]
+    # 待命：约 1.7 秒眨一次眼
+    return [(AGENT_OPEN, 0, 0, "")] * 6 + [(AGENT_CLOSED, 0, 0, "")]
+
+
+def task_frames(state: str) -> list:
+    """任务状态 → 文档图标帧序列。"""
+    if state == "active":  # 进行中：文字逐行打出
+        return [(doc_frames(1), 0, 0, ""), (doc_frames(2), 0, 0, ""), (DOC, 0, 0, "")]
+    return [(DOC, 0, 0, "")]
+
+
+class PixelSprite(tk.Canvas):
+    """12x12 像素画布，按帧列表循环播放。"""
+
+    SCALE = 3
+    TOP = 12  # 头顶动画区高度
+
+    def __init__(self, parent, bg):
+        side = 12 * self.SCALE
+        super().__init__(parent, width=side, height=side + self.TOP,
+                         bg=bg, highlightthickness=0, bd=0)
+        self.frames = [(AGENT_CLOSED, 0, 0, "")]
+        self.palette: dict = {}
+        self.overlay_color = "#9199a5"
+        self.index = 0
+
+    def set_animation(self, frames, palette, overlay_color="#9199a5"):
+        if frames != self.frames or palette != self.palette:
+            self.frames = list(frames)
+            self.palette = dict(palette)
+            self.index = 0
+            self.redraw()
+        self.overlay_color = overlay_color
+
+    def advance(self):
+        if len(self.frames) > 1:
+            self.index = (self.index + 1) % len(self.frames)
+            self.redraw()
+
+    def redraw(self):
+        self.delete("all")
+        grid, dx, dy, overlay = self.frames[self.index]
+        s = self.SCALE
+        for r, row in enumerate(grid):
+            for c, ch in enumerate(row):
+                color = self.palette.get(ch)
+                if color:
+                    x0 = c * s + dx
+                    y0 = r * s + dy + self.TOP
+                    self.create_rectangle(x0, y0, x0 + s, y0 + s, fill=color, outline="")
+        if overlay.strip():
+            self.create_text(12 * s - 2, 2, text=overlay, anchor="ne",
+                             fill=self.overlay_color, font=("Microsoft YaHei UI", 7, "bold"))
+
+
 class Widget:
     BG = "#16191e"
     CARD = "#20242b"
@@ -313,6 +426,7 @@ class Widget:
         self.root.deiconify()
         self.root.after(200, self._drain)
         self.root.after(1500, self._watch_screen)
+        self.root.after(280, self._tick)
         self.refresh()
 
     def label(self, parent, text="", *, fg=None, bg=None, size=9, bold=False, **kw):
@@ -327,6 +441,33 @@ class Widget:
                            cursor="hand2", padx=5, pady=1, font=("Microsoft YaHei UI", 9))
         button.pack(side="right")
         return button
+
+    def _member_card(self, parent):
+        """一张成员卡片：左侧像素动画，右侧名称 + 状态 + 副行。"""
+        card = tk.Frame(parent, bg=self.CARD, padx=8, pady=5)
+        card.pack(fill="x", pady=(4, 0))
+        sprite = PixelSprite(card, self.CARD)
+        sprite.pack(side="left")
+        right = tk.Frame(card, bg=self.CARD)
+        right.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        top = tk.Frame(right, bg=self.CARD)
+        top.pack(fill="x")
+        name = self.label(top, "—", bg=self.CARD, bold=True, size=9)
+        name.pack(side="left")
+        status = self.label(top, "", bg=self.CARD, size=8)
+        status.pack(side="right")
+        sub = self.label(right, "", bg=self.CARD, fg=self.MUTED, size=8, wraplength=224)
+        sub.pack(fill="x", pady=(2, 0))
+        return card, sprite, name, status, sub
+
+    def _tick(self) -> None:
+        """全局动画心跳：推进所有像素小人的帧。"""
+        if self.closing:
+            return
+        for rows in (self.task_rows, self.agent_rows):
+            for row in rows:
+                row[1].advance()
+        self.root.after(280, self._tick)
 
     def _build(self) -> None:
         outer = tk.Frame(self.root, bg=self.BG, highlightbackground="#3a3e45", highlightthickness=1)
@@ -389,28 +530,10 @@ class Widget:
             self.details.pack(fill="x", padx=12, pady=(8, 0))
         self.task_summary = self.label(self.details, "最近任务", bold=True, size=9)
         self.task_summary.pack(fill="x")
-        self.task_rows = []
-        for _ in range(3):
-            label = self.label(self.details, "—", fg=self.MUTED, size=8, wraplength=282)
-            label.pack(fill="x", pady=(3, 0))
-            self.task_rows.append(label)
+        self.task_rows = [self._member_card(self.details) for _ in range(3)]
         self.agent_summary = self.label(self.details, "AI 团队 · 等待读取", bold=True, size=9)
         self.agent_summary.pack(fill="x", pady=(9, 0))
-        self.agent_rows = []
-        for _ in range(3):
-            card = tk.Frame(self.details, bg=self.CARD, padx=8, pady=5)
-            card.pack(fill="x", pady=(4, 0))
-            top = tk.Frame(card, bg=self.CARD)
-            top.pack(fill="x")
-            dot = self.label(top, "○", bg=self.CARD, fg=self.MUTED, size=9)
-            dot.pack(side="left")
-            name = self.label(top, "—", bg=self.CARD, bold=True, size=9)
-            name.pack(side="left", padx=(5, 0))
-            status = self.label(top, "", bg=self.CARD, size=8)
-            status.pack(side="right")
-            sub = self.label(card, "", bg=self.CARD, fg=self.MUTED, size=8, wraplength=270)
-            sub.pack(fill="x", pady=(2, 0))
-            self.agent_rows.append((card, dot, name, status, sub))
+        self.agent_rows = [self._member_card(self.details) for _ in range(3)]
 
         self.footer = tk.Frame(outer, bg=self.BG)
         self.footer.pack(fill="x", padx=12, pady=(8, 8))
@@ -638,20 +761,45 @@ class Widget:
         agents = [t for t in threads if is_agent(t)]
         tasks = [t for t in threads if not is_agent(t)]
         self.task_summary.configure(text=f"最近任务 · {len(tasks)}")
-        labels = {"active": "运行中", "idle": "空闲", "notLoaded": "未加载", "systemError": "异常"}
-        tasks = sorted(tasks, key=lambda t: ((t.get("status") or {}).get("type") == "active", t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
-        for i, label in enumerate(self.task_rows):
+        self._render_tasks(tasks, data)
+        self._render_agents(agents, threads, data)
+
+    def _render_tasks(self, tasks: list, data: dict) -> None:
+        """任务卡片：像素文档图标，进行中时文字逐行打出。"""
+        status_map = {
+            "active": ("进行中", self.ACCENT),
+            "idle": ("空闲", self.MUTED),
+            "notLoaded": ("未加载", self.MUTED),
+            "systemError": ("异常", "#efad83"),
+        }
+        tasks = sorted(tasks, key=lambda t: ((t.get("status") or {}).get("type") == "active",
+                                             t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
+        for i, (card, sprite, name, status, sub) in enumerate(self.task_rows):
             if i >= len(tasks):
-                label.configure(text=("状态读取失败" if data.get("threads_error") else "暂无任务记录") if i == 0 else "", fg=self.MUTED)
+                if i == 0:
+                    card.pack(fill="x", pady=(4, 0))
+                    sprite.set_animation(task_frames(""), {"K": "#0d0f12", "D": "#6b7280", "L": "#4a5160"})
+                    name.configure(text="状态读取失败" if data.get("threads_error") else "暂无任务记录", fg=self.MUTED)
+                    status.configure(text="")
+                    sub.configure(text="")
+                else:
+                    card.pack_forget()
                 continue
+            card.pack(fill="x", pady=(4, 0))
             thread = tasks[i]
             state = (thread.get("status") or {}).get("type", "unknown")
-            name = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名任务"
-            name = " ".join(name.split())
-            if len(name) > 17:
-                name = name[:16] + "…"
-            label.configure(text=f"{'●' if state == 'active' else '○'}  {name} · {labels.get(state, '未知')}", fg=self.ACCENT if state == "active" else self.MUTED)
-        self._render_agents(agents, threads, data)
+            state_text, color = status_map.get(state, ("未知", self.MUTED))
+            nm = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名任务"
+            nm = " ".join(str(nm).split())
+            if len(nm) > 14:
+                nm = nm[:13] + "…"
+            name.configure(text=nm, fg=self.TEXT)
+            status.configure(text=state_text, fg=color)
+            sprite.set_animation(task_frames(state),
+                                 {"K": "#0d0f12", "D": "#c8cdd5",
+                                  "L": self.ACCENT if state == "active" else "#5a6270"})
+            ts = thread.get("recencyAt") or thread.get("updatedAt")
+            sub.configure(text=rel_time(ts) if isinstance(ts, (int, float)) and ts > 0 else " ")
 
     def _render_agents(self, agents: list, threads: list, data: dict) -> None:
         """马维斯风格的 AI 团队面板：成员卡片 + 口语化状态 + 角色/归属/活跃时间。"""
@@ -668,11 +816,12 @@ class Widget:
         }
         agents = sorted(agents, key=lambda t: ((t.get("status") or {}).get("type") == "active",
                                                t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
-        for i, (card, dot, name, status, sub) in enumerate(self.agent_rows):
+        for i, (card, sprite, name, status, sub) in enumerate(self.agent_rows):
             if i >= len(agents):
                 if i == 0:
                     card.pack(fill="x", pady=(4, 0))
-                    dot.configure(text="○", fg=self.MUTED)
+                    sprite.set_animation([(AGENT_CLOSED, 0, 0, "")],
+                                         {"K": "#0d0f12", "C": "#6b7280", "W": "#16191e"})
                     name.configure(text="状态读取失败" if data.get("threads_error") else "暂无团队成员", fg=self.MUTED)
                     status.configure(text="")
                     sub.configure(text="")
@@ -687,9 +836,11 @@ class Widget:
             nm = " ".join(str(nm).split())
             if len(nm) > 14:
                 nm = nm[:13] + "…"
-            dot.configure(text="●", fg=color)
             name.configure(text=nm, fg=self.TEXT)
             status.configure(text=state_text, fg=color)
+            sprite.set_animation(agent_frames(state),
+                                 {"K": "#0d0f12", "C": color, "W": "#16191e"},
+                                 overlay_color="#efad83" if state == "systemError" else self.MUTED)
             parts = []
             role = thread.get("agentRole")
             if role:
