@@ -351,6 +351,163 @@ class PixelSprite(tk.Canvas):
                              fill=self.overlay_color, font=("Microsoft YaHei UI", 7, "bold"))
 
 
+def draw_grid(canvas, grid, palette, x, y, scale, tag):
+    """在画布上按字符网格画像素块。"""
+    for r, row in enumerate(grid):
+        for c, ch in enumerate(row):
+            color = palette.get(ch)
+            if color:
+                x0 = x + c * scale
+                y0 = y + r * scale
+                canvas.create_rectangle(x0, y0, x0 + scale, y0 + scale, fill=color, outline="", tags=tag)
+
+
+class RoundedCard(tk.Canvas):
+    """圆角卡片容器：内容放进 .body，圆角背景自动跟随尺寸。"""
+
+    def __init__(self, parent, radius=9, bg="#16191e", fill="#20242b"):
+        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
+        self.radius = radius
+        self.fill_color = fill
+        self.body = tk.Frame(self, bg=fill)
+        self._window = self.create_window(0, 0, anchor="nw", window=self.body)
+        self.body.bind("<Configure>", self._fit_height)
+        self.bind("<Configure>", self._redraw)
+
+    def _fit_height(self, _event=None):
+        self.configure(height=self.body.winfo_reqheight())
+
+    def _redraw(self, _event=None):
+        w = self.winfo_width()
+        h = self.body.winfo_reqheight()
+        r = self.radius
+        fill = self.fill_color
+        self.delete("bg")
+        for (x1, y1, x2, y2, start) in ((0, 0, 2 * r, 2 * r, 90), (w - 2 * r, 0, w, 2 * r, 0),
+                                        (0, h - 2 * r, 2 * r, h, 180), (w - 2 * r, h - 2 * r, w, h, 270)):
+            self.create_arc(x1, y1, x2, y2, start=start, extent=90, style="pieslice",
+                            fill=fill, outline="", tags="bg")
+        self.create_rectangle(r, 0, w - r, h, fill=fill, outline="", tags="bg")
+        self.create_rectangle(0, r, w, h - r, fill=fill, outline="", tags="bg")
+        self.itemconfigure(self._window, width=w)
+        self.tag_lower("bg")
+
+
+class Office(tk.Canvas):
+    """迷你像素办公室：子代理按状态走到工位、沙发或 Bug 区。"""
+
+    WALL = "#1b1f26"
+    FLOOR = "#262c36"
+    FLOOR_Y = 96
+    WORK_SPOTS = ((28, 72), (64, 72), (100, 72))
+    REST_SPOTS = ((212, 68), (250, 68))
+    BUG_SPOTS = ((162, 70), (178, 82))
+    SPAWN = (6, 84)
+    MONITORS = ((44, 50, 62, 62), (90, 50, 108, 62))
+
+    def __init__(self, parent, bg):
+        super().__init__(parent, width=296, height=112, bg=bg, highlightthickness=0, bd=0)
+        self.actors: dict = {}
+        self._draw_room()
+
+    def _draw_room(self):
+        W, H, r = 296, 112, 10
+        wall = self.WALL
+        for (x1, y1, x2, y2, start) in ((0, 0, 2 * r, 2 * r, 90), (W - 2 * r, 0, W, 2 * r, 0),
+                                        (0, H - 2 * r, 2 * r, H, 180), (W - 2 * r, H - 2 * r, W, H, 270)):
+            self.create_arc(x1, y1, x2, y2, start=start, extent=90, style="pieslice",
+                            fill=wall, outline="", tags="bg")
+        self.create_rectangle(r, 0, W - r, H, fill=wall, outline="", tags="bg")
+        self.create_rectangle(0, r, W, H - r, fill=wall, outline="", tags="bg")
+        # 地板与踢脚线
+        self.create_rectangle(6, self.FLOOR_Y, W - 6, H - 6, fill=self.FLOOR, outline="", tags="bg")
+        self.create_rectangle(6, self.FLOOR_Y, W - 6, self.FLOOR_Y + 2, fill="#2e3540", outline="", tags="bg")
+        # 窗户
+        self.create_rectangle(120, 14, 168, 44, fill="#0d0f12", outline="#3a4150", tags="bg")
+        self.create_rectangle(124, 18, 164, 40, fill="#23303f", outline="", tags="bg")
+        self.create_line(144, 18, 144, 40, fill="#0d0f12", tags="bg")
+        # 海报
+        self.create_rectangle(186, 16, 220, 40, fill="#2b313d", outline="#3a4150", tags="bg")
+        self.create_text(203, 28, text="AI", fill="#5a6270", font=("Microsoft YaHei UI", 8, "bold"), tags="bg")
+        # 办公桌
+        self.create_rectangle(20, 62, 132, 68, fill="#3a4150", outline="", tags="bg")
+        self.create_rectangle(24, 68, 28, 96, fill="#2b313d", outline="", tags="bg")
+        self.create_rectangle(124, 68, 128, 96, fill="#2b313d", outline="", tags="bg")
+        # 沙发
+        self.create_rectangle(200, 60, 284, 76, fill="#323a48", outline="", tags="bg")
+        self.create_rectangle(196, 74, 288, 92, fill="#3a4150", outline="", tags="bg")
+        self.create_rectangle(196, 92, 200, 96, fill="#2b313d", outline="", tags="bg")
+        self.create_rectangle(284, 92, 288, 96, fill="#2b313d", outline="", tags="bg")
+        # 绿植
+        self.create_rectangle(146, 84, 158, 96, fill="#4a3a2f", outline="", tags="bg")
+        self.create_rectangle(149, 72, 155, 84, fill="#3f6b4f", outline="", tags="bg")
+        # Bug 区地毯
+        self.create_rectangle(160, 100, 196, 106, fill="#4a3436", outline="", tags="bg")
+
+    def update_agents(self, agents):
+        """agents: [(key, state, color)]，为每个成员分配目标位置。"""
+        spots = {"work": list(self.WORK_SPOTS), "rest": list(self.REST_SPOTS), "bug": list(self.BUG_SPOTS)}
+        overflow = 0
+        new = {}
+        for key, state, color in sorted(agents, key=lambda a: a[0]):
+            zone = "work" if state == "active" else "bug" if state == "systemError" else "rest"
+            if spots[zone]:
+                tx, ty = spots[zone].pop(0)
+            else:  # 工位满了就在绿植旁排队
+                tx, ty = 136 + 20 * overflow, 88
+                overflow += 1
+            actor = self.actors.get(key) or {"x": self.SPAWN[0], "y": self.SPAWN[1], "frame_i": 0}
+            actor.update(tx=tx, ty=ty, state=state, color=color)
+            new[key] = actor
+        self.actors = new
+        self.redraw_actors()
+
+    def advance(self):
+        for a in self.actors.values():
+            moving = False
+            for axis in ("x", "y"):
+                d = a["t" + axis] - a[axis]
+                if d:
+                    a[axis] = a["t" + axis] if abs(d) <= 3 else a[axis] + (3 if d > 0 else -3)
+                    moving = True
+            a["moving"] = moving
+            a["frame_i"] += 1
+        self.redraw_actors()
+
+    def redraw_actors(self):
+        self.delete("actor")
+        self.delete("screen")
+        active_count = sum(1 for a in self.actors.values() if a["state"] == "active")
+        for i, (x1, y1, x2, y2) in enumerate(self.MONITORS):
+            on = i < active_count
+            self.create_rectangle(x1, y1, x2, y2, fill="#0d0f12", outline="#3a4150", tags="screen")
+            self.create_rectangle(x1 + 2, y1 + 2, x2 - 2, y2 - 2,
+                                  fill="#2f4a3a" if on else "#141920", outline="", tags="screen")
+            self.create_rectangle((x1 + x2) // 2 - 1, y2, (x1 + x2) // 2 + 1, y2 + 4,
+                                  fill="#3a4150", outline="", tags="screen")
+        for key, a in sorted(self.actors.items()):
+            i = a["frame_i"]
+            state = a["state"]
+            if a.get("moving"):  # 走路：摆臂 + 上下颠
+                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), -(i % 2), ""
+            elif state == "active":  # 在工位打字
+                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), i % 2, ""
+            elif state == "systemError":  # 面壁 + 感叹号
+                grid, dy, overlay = AGENT_OPEN, 0, ("!" if i % 2 else "")
+            elif state == "notLoaded":  # 在沙发上睡觉
+                grid, dy = AGENT_CLOSED, 0
+                overlay = ("", "z", "z Z", "z Z z")[i % 4]
+            else:  # 在沙发上休息眨眼
+                grid, dy, overlay = (AGENT_CLOSED if i % 8 == 7 else AGENT_OPEN), 0, ""
+            dx = (i % 2) * 2 - 1 if state == "systemError" and not a.get("moving") else 0
+            draw_grid(self, grid, {"K": "#0d0f12", "C": a["color"], "W": "#16191e"},
+                      a["x"] + dx, a["y"] + dy, 2, "actor")
+            if overlay:
+                self.create_text(a["x"] + 22, a["y"] - 8, text=overlay, anchor="e",
+                                 fill="#efad83" if state == "systemError" else "#9199a5",
+                                 font=("Microsoft YaHei UI", 7, "bold"), tags="actor")
+
+
 class Widget:
     BG = "#16191e"
     CARD = "#20242b"
@@ -443,9 +600,11 @@ class Widget:
         return button
 
     def _member_card(self, parent):
-        """一张成员卡片：左侧像素动画，右侧名称 + 状态 + 副行。"""
-        card = tk.Frame(parent, bg=self.CARD, padx=8, pady=5)
-        card.pack(fill="x", pady=(4, 0))
+        """一张圆角成员卡片：左侧像素动画，右侧名称 + 状态 + 副行。"""
+        shell = RoundedCard(parent, bg=self.BG, fill=self.CARD)
+        shell.pack(fill="x", pady=(4, 0))
+        card = shell.body
+        card.configure(padx=8, pady=5)
         sprite = PixelSprite(card, self.CARD)
         sprite.pack(side="left")
         right = tk.Frame(card, bg=self.CARD)
@@ -458,15 +617,16 @@ class Widget:
         status.pack(side="right")
         sub = self.label(right, "", bg=self.CARD, fg=self.MUTED, size=8, wraplength=224)
         sub.pack(fill="x", pady=(2, 0))
-        return card, sprite, name, status, sub
+        return shell, sprite, name, status, sub
 
     def _tick(self) -> None:
-        """全局动画心跳：推进所有像素小人的帧。"""
+        """全局动画心跳：推进所有像素小人与办公室场景的帧。"""
         if self.closing:
             return
         for rows in (self.task_rows, self.agent_rows):
             for row in rows:
                 row[1].advance()
+        self.office.advance()
         self.root.after(280, self._tick)
 
     def _build(self) -> None:
@@ -485,8 +645,10 @@ class Widget:
             target.bind("<ButtonRelease-1>", self.drag_end)
             target.bind("<Double-Button-1>", lambda _: self.toggle_fold())
 
-        card = tk.Frame(outer, bg=self.CARD, padx=12, pady=9)
-        card.pack(fill="x", padx=12)
+        card_shell = RoundedCard(outer, bg=self.BG, fill=self.CARD)
+        card_shell.pack(fill="x", padx=12)
+        card = card_shell.body
+        card.configure(padx=12, pady=9)
         line = tk.Frame(card, bg=self.CARD)
         line.pack(fill="x")
         self.label(line, "Codex", bg=self.CARD, bold=True, size=11).pack(side="left")
@@ -506,8 +668,10 @@ class Widget:
         self.reset_label = self.label(card, "正在读取…", bg=self.CARD, fg=self.MUTED, size=8)
         self.reset_label.pack(anchor="w", pady=(5, 0))
 
-        kimi = tk.Frame(outer, bg=self.CARD, padx=12, pady=9)
-        kimi.pack(fill="x", padx=12, pady=(9, 0))
+        kimi_shell = RoundedCard(outer, bg=self.BG, fill=self.CARD)
+        kimi_shell.pack(fill="x", padx=12, pady=(9, 0))
+        kimi = kimi_shell.body
+        kimi.configure(padx=12, pady=9)
         line = tk.Frame(kimi, bg=self.CARD)
         line.pack(fill="x")
         self.label(line, "Kimi Code", bg=self.CARD, bold=True, size=11).pack(side="left")
@@ -533,6 +697,8 @@ class Widget:
         self.task_rows = [self._member_card(self.details) for _ in range(3)]
         self.agent_summary = self.label(self.details, "AI 团队 · 等待读取", bold=True, size=9)
         self.agent_summary.pack(fill="x", pady=(9, 0))
+        self.office = Office(self.details, self.BG)
+        self.office.pack(pady=(6, 0))
         self.agent_rows = [self._member_card(self.details) for _ in range(3)]
 
         self.footer = tk.Frame(outer, bg=self.BG)
@@ -856,6 +1022,12 @@ class Widget:
             if isinstance(ts, (int, float)) and ts > 0:
                 parts.append(rel_time(ts))
             sub.configure(text=" · ".join(parts) or " ")
+        self.office.update_agents([
+            (str(t.get("id") or t.get("agentNickname") or t.get("name") or f"agent{i}"),
+             (t.get("status") or {}).get("type", "unknown"),
+             status_map.get((t.get("status") or {}).get("type", "unknown"), ("", self.MUTED))[1])
+            for i, t in enumerate(agents)
+        ])
         has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
         self.status.configure(text="部分数据不可用 · 自动重试" if has_error else f"{time.strftime('%H:%M:%S')} 更新 · 每 20 秒")
         self.resize()
