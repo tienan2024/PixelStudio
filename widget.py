@@ -21,6 +21,7 @@ import urllib.request
 
 HOME = Path.home()
 PREFERENCES = Path(__file__).resolve().parents[1] / ".runtime/widget-preferences.json"
+TEAM_STATS = PREFERENCES.parent / "widget-team-stats.json"
 POLL_SECONDS = 20
 
 # Kimi Code 配置文件候选位置（环境变量优先，其次为本机运行时与常见用户目录）
@@ -236,6 +237,33 @@ def rel_time(ts: float) -> str:
     if delta < 86400:
         return f"{int(delta // 3600)} 小时前活跃"
     return f"{int(delta // 86400)} 天前活跃"
+
+
+def fmt_duration(seconds: int) -> str:
+    """把秒数转成口语化时长。"""
+    minutes = int(seconds) // 60
+    if minutes < 1:
+        return "不到 1 分钟"
+    if minutes < 60:
+        return f"{minutes} 分钟"
+    hours, rest = divmod(minutes, 60)
+    return f"{hours} 小时 {rest} 分钟" if rest else f"{hours} 小时"
+
+
+def load_team_stats() -> dict:
+    try:
+        data = json.loads(TEAM_STATS.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_team_stats(stats: dict) -> None:
+    try:
+        TEAM_STATS.parent.mkdir(parents=True, exist_ok=True)
+        TEAM_STATS.write_text(json.dumps(stats, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -543,6 +571,8 @@ class Widget:
         self.closing = False
         self.refresh_timer = None
         self.last_data = {}
+        self.team_stats = load_team_stats()
+        self.last_sample: float | None = None
         self.snapped: set[str] = set(prefs.get("snapped") or []) & {"left", "right", "top", "bottom"}
         self._build()
         self.root.update_idletasks()
@@ -699,6 +729,8 @@ class Widget:
         self.agent_summary.pack(fill="x", pady=(9, 0))
         self.office = Office(self.details, self.BG)
         self.office.pack(pady=(6, 0))
+        self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
+        self.memo.pack(fill="x", pady=(4, 0))
         self.agent_rows = [self._member_card(self.details) for _ in range(3)]
 
         self.footer = tk.Frame(outer, bg=self.BG)
@@ -929,6 +961,42 @@ class Widget:
         self.task_summary.configure(text=f"最近任务 · {len(tasks)}")
         self._render_tasks(tasks, data)
         self._render_agents(agents, threads, data)
+        self._sample_team_stats(tasks, agents)
+        self.memo.configure(text=self._memo_text())
+
+    def _sample_team_stats(self, tasks: list, agents: list) -> None:
+        """按刷新节奏累积今日团队统计：任务数、成员数、忙碌时长。"""
+        today = time.strftime("%Y-%m-%d")
+        rec = self.team_stats.setdefault(today, {"busy": 0, "peak": 0, "tasks": [], "agents": []})
+        now = time.time()
+        busy = any((t.get("status") or {}).get("type") == "active" for t in tasks + agents)
+        if self.last_sample and busy:
+            rec["busy"] = rec.get("busy", 0) + int(min(now - self.last_sample, POLL_SECONDS * 2))
+        self.last_sample = now
+        rec["peak"] = max(rec.get("peak", 0), len(agents))
+        rec["tasks"] = sorted(set(rec.get("tasks", [])) | {str(t["id"]) for t in tasks if t.get("id")})
+        rec["agents"] = sorted(set(rec.get("agents", [])) | {str(t["id"]) for t in agents if t.get("id")})
+        for day in sorted(self.team_stats)[:-7]:  # 只保留最近 7 天
+            del self.team_stats[day]
+        save_team_stats(self.team_stats)
+
+    def _memo_text(self) -> str:
+        """优先昨日小记；昨天没数据就展示今日进展。"""
+        today = time.strftime("%Y-%m-%d")
+        for day in sorted(self.team_stats, reverse=True):
+            if day >= today:
+                continue
+            rec = self.team_stats[day]
+            if rec.get("tasks") or rec.get("busy"):
+                return (f"昨日小记 · 处理 {len(rec.get('tasks', []))} 项任务 · "
+                        f"{max(rec.get('peak', 0), len(rec.get('agents', [])))} 名成员上岗 · "
+                        f"忙碌 {fmt_duration(rec.get('busy', 0))}")
+        rec = self.team_stats.get(today)
+        if rec and (rec.get("tasks") or rec.get("agents")):
+            return (f"今日小记 · 已处理 {len(rec.get('tasks', []))} 项任务 · "
+                    f"{max(rec.get('peak', 0), len(rec.get('agents', [])))} 名成员上岗 · "
+                    f"忙碌 {fmt_duration(rec.get('busy', 0))}")
+        return "小记 · 团队还没有留下今天的足迹"
 
     def _render_tasks(self, tasks: list, data: dict) -> None:
         """任务卡片：像素文档图标，进行中时文字逐行打出。"""
