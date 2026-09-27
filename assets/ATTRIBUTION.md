@@ -9,7 +9,14 @@
 - 完整提示词见 `pixel-world.prompt.txt`。
 - 实时成员及状态动画由程序单独绘制，生成底图不包含虚构代理。
 
-## Office worker sprites
+## 像素美少女待机精灵
+
+- `characters-idle.png`：2026-09-27 通过 Codex 内置 imagegen 为本项目生成，透明 RGBA 原图保留。
+- 两套成年女性角色造型，每套四帧：中性、呼吸、眨眼、轻微重心变化。
+- 提示词：`characters-idle.prompt.txt`；原图帧区域：`characters-idle.json`。
+- 程序运行时按帧区域加载，并以整数最近邻采样制作世界人物和成员卡头像。
+
+## Office worker sprites（历史素材）
 
 - **作者**：emcee-flesher
 - **来源**：OpenGameArt — https://opengameart.org/content/office-worker-sprites
@@ -18,4 +25,4 @@
 - **用途**：`frames/` 目录下的复古电脑（`pc_*`）与饮水机（`cooler_*`）动画帧，
   从原 sprite sheet 按 16×16 帧切分并放大至 32×32。
 - **改动说明**：仅做帧切分与 2 倍最近邻放大，未修改像素内容。
-  同包的职员素材未使用（办公室中的角色为项目自绘）。
+  同包的职员素材未使用；当前角色采用上面的生成式待机精灵。

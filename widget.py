@@ -19,6 +19,7 @@ import tkinter as tk
 import urllib.request
 
 from pixel_world import PixelWorld
+from character_sprites import character_bank, draw_fallback, member_key
 
 
 HOME = Path.home()
@@ -272,31 +273,6 @@ def save_team_stats(stats: dict) -> None:
 # 像素小动画（灵感来自 Star-Office-UI：状态驱动动画，AI 干什么就演什么）
 # ---------------------------------------------------------------------------
 
-AGENT_OPEN = (
-    "............",
-    "...KKKKKK...",
-    "..KCCCCCCK..",
-    ".KCWWKKWWCK.",
-    ".KCCCCCCCCK.",
-    ".KCCCCCCCCK.",
-    "..KCCCCCCK..",
-    "...KKKKKK...",
-    "...K.K.K....",
-    "...K.K.K....",
-    "............",
-    "............",
-)
-
-AGENT_ARMS_UP = AGENT_OPEN[:4] + ("KKCCCCCCCCKK",) + AGENT_OPEN[5:]
-
-AGENT_CLOSED = AGENT_OPEN[:3] + (".KCKKKKKKCK.",) + AGENT_OPEN[4:]
-
-# 专注（干活时 -_- 眼 + 举手打字）
-AGENT_FOCUS = AGENT_OPEN[:3] + (".KCKKKKKKCK.", "KKCCCCCCCCKK") + AGENT_OPEN[5:]
-
-# 报错（X_X 晕眩眼：两行拼出 X 形）
-AGENT_ERROR = AGENT_OPEN[:3] + (".KCKWKKWKCK.", ".KCWKKKWKCK.") + AGENT_OPEN[5:]
-
 DOC = (
     "............",
     "..KKKKKKKK..",
@@ -322,19 +298,6 @@ def doc_frames(lines: int) -> tuple:
     return tuple(grid)
 
 
-def agent_frames(state: str) -> list:
-    """子代理状态 → 帧序列 (grid, dx, dy, 头顶文字)。"""
-    if state == "active":  # 干活中：专注眼举手打字 + 身体起伏
-        return [(AGENT_FOCUS, 0, 0, ""), (AGENT_OPEN, 0, 1, "")]
-    if state == "notLoaded":  # 独立 app-server 无法确认运行态
-        return [(AGENT_OPEN, 0, 0, "?"), (AGENT_OPEN, 0, 0, "")]
-    if state == "systemError":  # 异常：X_X 晕眩眼左右摇晃 + 感叹号闪烁
-        return [(AGENT_ERROR, -1, 0, "!"), (AGENT_ERROR, 1, 0, ""),
-                (AGENT_ERROR, -1, 0, "!"), (AGENT_ERROR, 1, 0, "")]
-    # 待命：约 1.7 秒眨一次眼
-    return [(AGENT_OPEN, 0, 0, "")] * 6 + [(AGENT_CLOSED, 0, 0, "")]
-
-
 def task_frames(state: str) -> list:
     """任务状态 → 文档图标帧序列。"""
     if state == "active":  # 进行中：文字逐行打出
@@ -343,7 +306,7 @@ def task_frames(state: str) -> list:
 
 
 class PixelSprite(tk.Canvas):
-    """12x12 像素画布，按帧列表循环播放。"""
+    """Grid task icons and shared animated character portraits."""
 
     SCALE = 3
     TOP = 12  # 头顶动画区高度
@@ -352,26 +315,52 @@ class PixelSprite(tk.Canvas):
         side = 12 * self.SCALE
         super().__init__(parent, width=side, height=side + self.TOP,
                          bg=bg, highlightthickness=0, bd=0)
-        self.frames = [(AGENT_CLOSED, 0, 0, "")]
+        self.frames = [(("............",)*12, 0, 0, "")]
         self.palette: dict = {}
         self.overlay_color = "#9199a5"
         self.index = 0
+        self.character = None
 
     def set_animation(self, frames, palette, overlay_color="#9199a5"):
-        if frames != self.frames or palette != self.palette:
+        was_character = self.character is not None
+        self.character = None
+        if frames != self.frames or palette != self.palette or was_character:
             self.frames = list(frames)
             self.palette = dict(palette)
             self.index = 0
             self.redraw()
         self.overlay_color = overlay_color
 
+    def set_character(self, key, state):
+        self.character = (key, state)
+        self.redraw()
+
+    def set_empty(self):
+        self.set_animation([(("............",)*12, 0, 0, "")], {})
+
     def advance(self):
-        if len(self.frames) > 1:
+        if self.character is not None:
+            self.redraw()
+        elif len(self.frames) > 1:
             self.index = (self.index + 1) % len(self.frames)
             self.redraw()
 
     def redraw(self):
         self.delete("all")
+        if self.character is not None:
+            key, state = self.character
+            bank = character_bank(self)
+            frame, dx, dy = bank.sample(key, state, "card")
+            if frame is not None:
+                self.create_image(18+dx, 47+dy, image=frame, anchor="s")
+            else:
+                draw_fallback(self, 18+dx, 47+dy, bank.assignments.get(key, 0), "portrait")
+            badge = "?" if state in {"unknown", "notLoaded"} else "!" if state == "systemError" else ""
+            if badge:
+                self.create_text(33, 2, text=badge, anchor="ne",
+                                 fill="#efad83" if state == "systemError" else "#9199a5",
+                                 font=("Microsoft YaHei UI", 7, "bold"))
+            return
         grid, dx, dy, overlay = self.frames[self.index]
         s = self.SCALE
         for r, row in enumerate(grid):
@@ -1106,6 +1095,7 @@ class Widget:
 
     def _render_agents(self, agents: list, threads: list, data: dict) -> None:
         """马维斯风格的 AI 团队面板：成员卡片 + 口语化状态 + 角色/归属/活跃时间。"""
+        character_bank(self.root).register(agents)
         self.agent_summary.configure(
             text=f"AI 团队 · {len(agents)} 位成员" if agents else
             ("AI 团队 · 状态读取失败" if data.get("threads_error") else "AI 团队 · 暂无成员"))
@@ -1122,8 +1112,7 @@ class Widget:
             if i >= len(agents):
                 if i == 0:
                     card.pack(fill="x", pady=(4, 0))
-                    sprite.set_animation([(AGENT_CLOSED, 0, 0, "")],
-                                         {"K": "#0d0f12", "C": "#6b7280", "W": "#16191e"})
+                    sprite.set_empty()
                     name.configure(text="状态读取失败" if data.get("threads_error") else "暂无团队成员", fg=self.MUTED)
                     status.configure(text="")
                     sub.configure(text="")
@@ -1140,9 +1129,7 @@ class Widget:
                 nm = nm[:13] + "…"
             name.configure(text=nm, fg=self.TEXT)
             status.configure(text=state_text, fg=color)
-            sprite.set_animation(agent_frames(state),
-                                 {"K": "#0d0f12", "C": color, "W": "#16191e"},
-                                 overlay_color="#efad83" if state == "systemError" else self.MUTED)
+            sprite.set_character(member_key(thread), state)
             parts = []
             role = thread.get("agentRole")
             if role:

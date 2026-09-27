@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 import tkinter as tk
 
+from character_sprites import character_bank, draw_fallback, member_key
+
 
 class PixelWorld(tk.Canvas):
     WIDTH, HEIGHT = 1120, 224
@@ -12,10 +14,6 @@ class PixelWorld(tk.Canvas):
               "notLoaded": "#b4becb", "unknown": "#b4becb"}
     LABELS = {"active": "运行中", "idle": "待命", "systemError": "异常",
               "notLoaded": "未加载 · 状态未知", "unknown": "状态未知"}
-    BODY = ("............", "...KKKKKK...", "..KCCCCCCK..", ".KCCCCCCCCK.",
-            ".KCCWCCWCCK.", ".KCCKCCKCCK.", ".KCCCCCCCCK.", "KCCCCCCCCCCK",
-            "KCCCCCCCCCCK", ".KCCCCCCCCK.", "..KKKKKKKK..", "...KK..KK...")
-
     def __init__(self, parent, *, bg, on_toggle=None, on_select=None):
         super().__init__(parent, width=294, height=self.HEIGHT, bg=bg,
                          highlightthickness=0, bd=0, cursor="hand2",
@@ -26,6 +24,7 @@ class PixelWorld(tk.Canvas):
         self.view_width, self.expanded = 294, False
         self.edge_colors = (bg, bg)
         self.background = None
+        self.characters = character_bank(self)
         self._background()
         self.bind("<Configure>", lambda _e: self._center_view())
         self.bind("<Button-1>", self._click)
@@ -103,21 +102,27 @@ class PixelWorld(tk.Canvas):
         self.rect(1036, 142, 28, 6, "#d5bb84")
 
     def set_agents(self, threads):
+        self.characters.register(threads)
         ordered = sorted(threads, key=lambda t: ((t.get("status") or {}).get("type") != "active",
                                                 str(t.get("id") or t.get("name") or "")))
         self.total = len(threads)
         self.active = sum((t.get("status") or {}).get("type") == "active" for t in threads)
-        actors, zone_counts = {}, {}
-        for i, thread in enumerate(ordered[:12]):
-            key = str(thread.get("id") or thread.get("agentNickname") or f"agent{i}")
+        actors, zone_counts, occupied = {}, {}, []
+        for thread in ordered[:12]:
+            key = member_key(thread)
             state = (thread.get("status") or {}).get("type", "unknown")
             state = state if state in self.COLORS else "unknown"
             n = zone_counts.get(state, 0)
             zone_counts[state] = n+1
-            starts = {"active": 388, "idle": 842, "systemError": 242,
-                      "notLoaded": 440, "unknown": 586}
-            tx = starts[state] + (n % 4) * (100 if state == "active" else 32)
-            ty = 162 + (n // 4) * 4
+            starts = {"active": 400, "idle": 852, "systemError": 240,
+                      "notLoaded": 470, "unknown": 586}
+            preferred = starts[state] + (n % 4) * (100 if state == "active" else 56)
+            candidates = ([preferred] if n < 4 else []) + sorted(
+                range(56, 1080, 48), key=lambda x: abs(x-preferred))
+            candidates += sorted(range(32, 1081, 2), key=lambda x: abs(x-preferred))
+            tx = next(x for x in candidates if x <= 1080 and all(abs(x-other) >= 38 for other in occupied))
+            occupied.append(tx)
+            ty = 189
             actor = self.actors.get(key, {"x": tx, "y": ty})
             actor.update(tx=tx, ty=ty, state=state,
                          name=" ".join(str(thread.get("agentNickname") or thread.get("name") or "AI 成员").split()),
@@ -131,6 +136,7 @@ class PixelWorld(tk.Canvas):
     def advance(self):
         self.frame += 1
         for a in self.actors.values():
+            a["moving"] = a["x"] != a["tx"] or a["y"] != a["ty"]
             for axis in ("x", "y"):
                 delta = a["t"+axis]-a[axis]
                 a[axis] += max(-2, min(2, delta))
@@ -151,21 +157,23 @@ class PixelWorld(tk.Canvas):
             if self.frame%5 < 2:
                 for x, y in ((445, 51), (622, 66), (818, 53)):
                     self.rect(x, y, 2, 2, "#d9be81", "live")
-        for key, a in self.actors.items():
-            x, y = a["x"], a["y"]
-            self.rect(x+2, y+22, 22, 4, "#544738", "live")
-            colors = {"K": self.INK, "C": self.COLORS[a["state"]], "W": "#fff1cc"}
-            bob = 2 if a["state"] == "active" and self.frame % 2 else 0
-            for row, pixels in enumerate(self.BODY):
-                for col, p in enumerate(pixels):
-                    if p in colors:
-                        self.rect(x+col*2, y+row*2-bob, 2, 2, colors[p], "live")
+        for key, a in sorted(self.actors.items(), key=lambda item: item[1]["y"]):
+            x, y = a["x"], a["y"]  # Position is the feet, not the sprite's top-left.
+            self.rect(x-11, y-1, 22, 3, "#544738", "live")
+            frame, dx, dy = self.characters.sample(key, a["state"], moving=a.get("moving", False))
+            if frame is not None:
+                self.create_image(x+dx, y+dy, image=frame, anchor="s", tags="live")
+                width, height = frame.width(), frame.height()
+            else:
+                draw_fallback(self, x+dx, y+dy, self.characters.assignments.get(key, 0), "live")
+                width, height = 20, 40
+            a["bounds"] = (x-width//2-5, y-height-8, x+width//2+5, y+4)
             badge = "?" if a["state"] in {"unknown", "notLoaded"} else "!" if a["state"] == "systemError" else ""
             if badge:
-                self.create_text(x+26, y-4, text=badge, fill=colors["C"],
+                self.create_text(x+width//2+4, y-height-1, text=badge, fill=self.COLORS[a["state"]],
                                  font=("Consolas", 10, "bold"), tags="live")
             if key == self.selected:
-                self.rect(x+6, y-8, 12, 2, "#f3ca7d", "live")
+                self.rect(x-9, y+3, 18, 2, "#f3ca7d", "live")
         self._overlay()
 
     def set_viewport(self, width, *, expanded, left_bg, right_bg):
@@ -219,8 +227,9 @@ class PixelWorld(tk.Canvas):
                 self.on_toggle()
             return
         x, y = self.canvasx(event.x), event.y
-        for key, a in reversed(list(self.actors.items())):
-            if a["x"]-4 <= x <= a["x"]+30 and a["y"]-8 <= y <= a["y"]+28:
+        for key, a in reversed(sorted(self.actors.items(), key=lambda item: item[1]["y"])):
+            x1, y1, x2, y2 = a.get("bounds", (a["x"]-18, a["y"]-64, a["x"]+18, a["y"]+4))
+            if x1 <= x <= x2 and y1 <= y <= y2:
                 self.selected = key
                 self._overlay()
                 if self.on_select:
