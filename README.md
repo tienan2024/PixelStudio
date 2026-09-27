@@ -39,3 +39,10 @@ powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 ```
 
 窗口位置、置顶、折叠状态保存在上级目录 `.runtime/widget-preferences.json`；团队统计保存在 `.runtime/widget-team-stats.json`（保留最近 7 天）。
+
+## 素材署名
+
+办公室场景中的职员、电脑、饮水机像素动画来自 OpenGameArt 的
+[Office worker sprites](https://opengameart.org/content/office-worker-sprites)，
+作者 **emcee-flesher**，许可证 **CC-BY 4.0**。详见 [assets/ATTRIBUTION.md](assets/ATTRIBUTION.md)。
+素材缺失时组件会自动退回手绘图形，不影响使用。

@@ -390,6 +390,32 @@ def draw_grid(canvas, grid, palette, x, y, scale, tag):
                 canvas.create_rectangle(x0, y0, x0 + scale, y0 + scale, fill=color, outline="", tags=tag)
 
 
+# ---------------------------------------------------------------------------
+# 真实素材（CC-BY: emcee-flesher, OpenGameArt "Office worker sprites"）
+# ---------------------------------------------------------------------------
+
+ASSETS = Path(__file__).resolve().parent / "assets" / "frames"
+SPRITES: dict[str, list] = {}
+
+
+def load_sprites() -> None:
+    """加载 assets/frames 下的 PNG 帧（PhotoImage 需要 Tk root 已创建）。"""
+    if SPRITES or not ASSETS.is_dir():
+        return
+    groups: dict[str, list[tuple[int, tk.PhotoImage]]] = {}
+    for p in ASSETS.glob("*.png"):
+        stem, _, idx = p.stem.rpartition("_")
+        groups.setdefault(stem, []).append((int(idx), tk.PhotoImage(file=str(p))))
+    for stem, frames in groups.items():
+        SPRITES[stem] = [img for _, img in sorted(frames)]
+
+
+def sprite(name: str, i: int):
+    """取一组帧中的第 i 帧（循环）；素材缺失时返回 None 走手绘兜底。"""
+    frames = SPRITES.get(name)
+    return frames[i % len(frames)] if frames else None
+
+
 class RoundedCard(tk.Canvas):
     """圆角卡片容器：内容放进 .body，圆角背景自动跟随尺寸。"""
 
@@ -427,12 +453,13 @@ class Office(tk.Canvas):
     WALL = "#1b1f26"
     FLOOR = "#262c36"
     FLOOR_Y = 100
-    WORK_SPOTS = ((72, 76), (104, 76), (136, 76))
-    COUCH_SPOTS = ((214, 72), (246, 72))
-    COFFEE_SPOT = (178, 76)
-    BUG_SPOTS = ((34, 76), (44, 88))
-    SPAWN = (8, 88)
-    MONITORS = ((84, 52, 102, 66), (120, 52, 138, 66))
+    WORK_SPOTS = ((72, 68), (104, 68), (136, 68))
+    COUCH_SPOTS = ((214, 62), (246, 62))
+    COFFEE_SPOT = (148, 68)
+    BUG_SPOTS = ((34, 68), (44, 80))
+    SPAWN = (8, 68)
+    COMPUTERS = ((80, 40), (116, 40))
+    COOLER_POS = (178, 68)
 
     def __init__(self, parent, bg):
         super().__init__(parent, width=296, height=124, bg=bg, highlightthickness=0, bd=0)
@@ -487,12 +514,8 @@ class Office(tk.Canvas):
         # 桌前地毯（猫睡这里）
         self.create_rectangle(62, 100, 162, 106, fill="#2e3540", outline="#343c4a", tags="bg")
         # 绿植
-        self.create_rectangle(166, 88, 178, 100, fill="#4a3a2f", outline="", tags="bg")
-        self.create_rectangle(169, 74, 175, 88, fill="#3f6b4f", outline="", tags="bg")
-        # 咖啡机（热气每帧升腾）
-        self.create_rectangle(186, 68, 202, 100, fill="#2b313d", outline="#3a4150", tags="bg")
-        self.create_rectangle(189, 72, 199, 78, fill="#141920", outline="", tags="bg")
-        self.create_rectangle(190, 88, 196, 94, fill="#c8cdd5", outline="", tags="bg")
+        self.create_rectangle(162, 88, 174, 100, fill="#4a3a2f", outline="", tags="bg")
+        self.create_rectangle(165, 74, 171, 88, fill="#3f6b4f", outline="", tags="bg")
         # 沙发
         self.create_rectangle(210, 64, 274, 78, fill="#323a48", outline="", tags="bg")
         self.create_rectangle(206, 76, 278, 94, fill="#3a4150", outline="", tags="bg")
@@ -520,7 +543,7 @@ class Office(tk.Canvas):
                 tx, ty = 150 + 20 * overflow, 92
                 overflow += 1
             actor = self.actors.get(key) or {"x": self.SPAWN[0], "y": self.SPAWN[1], "frame_i": 0}
-            actor.update(tx=tx, ty=ty, state=state, color=color)
+            actor.update(tx=tx, ty=ty, state=state, color=color, zone=zone)
             new[key] = actor
         self.actors = new
         self.redraw_actors()
@@ -542,33 +565,54 @@ class Office(tk.Canvas):
         self.delete("actor")
         self.delete("screen")
         self._draw_ambient()
+        i = self.frame
         active_count = sum(1 for a in self.actors.values() if a["state"] == "active")
-        for i, (x1, y1, x2, y2) in enumerate(self.MONITORS):
-            on = i < active_count
-            self.create_rectangle(x1, y1, x2, y2, fill="#0d0f12", outline="#3a4150", tags="screen")
-            self.create_rectangle(x1 + 2, y1 + 2, x2 - 2, y2 - 2,
-                                  fill="#2f4a3a" if on else "#141920", outline="", tags="screen")
-            self.create_rectangle((x1 + x2) // 2 - 1, y2, (x1 + x2) // 2 + 1, y2 + 4,
-                                  fill="#3a4150", outline="", tags="screen")
+        has_error = any(a["state"] == "systemError" for a in self.actors.values())
+        # 复古电脑：有人干活就亮屏跑动画，报错切错误屏，没人用就黑屏
+        for n, (cx, cy) in enumerate(self.COMPUTERS):
+            if has_error:
+                img = sprite("pc_err", i + n)
+            elif n < active_count:
+                img = sprite("pc_on", i + n)
+            else:
+                img = sprite("pc_off", 0)
+            if img is not None:
+                self.create_image(cx, cy, image=img, anchor="nw", tags="screen")
+            else:
+                self.create_rectangle(cx, cy, cx + 32, cy + 32, fill="#0d0f12",
+                                      outline="#3a4150", tags="screen")
+        # 饮水机（素材自带水泡动画）
+        img = sprite("cooler", i)
+        if img is not None:
+            self.create_image(self.COOLER_POS[0], self.COOLER_POS[1], image=img,
+                              anchor="nw", tags="screen")
         for key, a in sorted(self.actors.items()):
-            i = a["frame_i"]
             state = a["state"]
-            if a.get("moving"):  # 走路：摆臂 + 上下颠
-                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), -(i % 2), ""
+            overlay = ""
+            dx = 0
+            v = "w1" if sum(map(ord, key)) % 2 == 0 else "w2"  # 按 key 稳定分配皮肤
+            if a.get("moving"):  # 走过去：按方向选左/右行走
+                img = sprite(f"{v}_walk_r" if a["tx"] >= a["x"] else f"{v}_walk_l", i)
             elif state == "active":  # 在工位打字
-                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), i % 2, ""
+                img = sprite(f"{v}_type", i)
             elif state == "systemError":  # 面壁 + 感叹号
-                grid, dy, overlay = AGENT_OPEN, 0, ("!" if i % 2 else "")
-            elif state == "notLoaded":  # 在沙发上睡觉
-                grid, dy = AGENT_CLOSED, 0
+                img = sprite(f"{v}_idle", 0)
+                overlay = "!" if i % 2 else ""
+                dx = (i % 2) * 2 - 1
+            elif state == "notLoaded":  # 睡觉
+                img = sprite(f"{v}_idle", 0)
                 overlay = ("", "z", "z Z", "z Z z")[i % 4]
-            else:  # 在沙发上休息眨眼
-                grid, dy, overlay = (AGENT_CLOSED if i % 8 == 7 else AGENT_OPEN), 0, ""
-            dx = (i % 2) * 2 - 1 if state == "systemError" and not a.get("moving") else 0
-            draw_grid(self, grid, {"K": "#0d0f12", "C": a["color"], "W": "#16191e"},
-                      a["x"] + dx, a["y"] + dy, 2, "actor")
+            elif a.get("zone") == "lounge":  # 饮水机旁喝水
+                img = sprite(f"{v}_drink", i)
+            else:  # 站着休息（慢放呼吸）
+                img = sprite(f"{v}_idle", i // 2)
+            if img is not None:
+                self.create_image(a["x"] + dx, a["y"], image=img, anchor="nw", tags="actor")
+            else:  # 素材缺失时退回手绘史莱姆
+                draw_grid(self, AGENT_OPEN, {"K": "#0d0f12", "C": a["color"], "W": "#16191e"},
+                          a["x"] + dx, a["y"], 2, "actor")
             if overlay:
-                self.create_text(a["x"] + 22, a["y"] - 8, text=overlay, anchor="e",
+                self.create_text(a["x"] + 30, a["y"] - 8, text=overlay, anchor="e",
                                  fill="#efad83" if state == "systemError" else "#9199a5",
                                  font=("Microsoft YaHei UI", 7, "bold"), tags="actor")
 
@@ -601,11 +645,6 @@ class Office(tk.Canvas):
                 self.create_rectangle(49 + led * 3, 56 + slot * 12, 51 + led * 3, 58 + slot * 12,
                                       fill=("#99ddb6" if led == 0 else "#efad83") if on else "#2b313d",
                                       outline="", tags="dyn")
-        # 咖啡机热气升腾
-        for puff in range(3):
-            if (i // 2 + puff) % 3 == 0:
-                self.create_rectangle(191 + puff % 2, 82 - puff * 4, 193 + puff % 2, 84 - puff * 4,
-                                      fill="#4a5160", outline="", tags="dyn")
         # 地毯上睡觉的猫：尾巴摆动
         self.create_rectangle(66, 94, 76, 99, fill="#6b7280", outline="", tags="dyn")
         self.create_rectangle(66, 91, 71, 95, fill="#6b7280", outline="", tags="dyn")
@@ -653,6 +692,7 @@ class Widget:
         self.team_stats = load_team_stats()
         self.last_sample: float | None = None
         self.snapped: set[str] = set(prefs.get("snapped") or []) & {"left", "right", "top", "bottom"}
+        load_sprites()
         self._build()
         self.root.update_idletasks()
         height = self.root.winfo_reqheight()
