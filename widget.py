@@ -324,9 +324,8 @@ def agent_frames(state: str) -> list:
     """子代理状态 → 帧序列 (grid, dx, dy, 头顶文字)。"""
     if state == "active":  # 干活中：专注眼举手打字 + 身体起伏
         return [(AGENT_FOCUS, 0, 0, ""), (AGENT_OPEN, 0, 1, "")]
-    if state == "notLoaded":  # 休息中：闭眼 + Zzz 飘出
-        return [(AGENT_CLOSED, 0, 0, ""), (AGENT_CLOSED, 0, 0, "z"),
-                (AGENT_CLOSED, 0, 0, "z Z"), (AGENT_CLOSED, 0, 0, "z Z z")]
+    if state == "notLoaded":  # 独立 app-server 无法确认运行态
+        return [(AGENT_OPEN, 0, 0, "?"), (AGENT_OPEN, 0, 0, "")]
     if state == "systemError":  # 异常：X_X 晕眩眼左右摇晃 + 感叹号闪烁
         return [(AGENT_ERROR, -1, 0, "!"), (AGENT_ERROR, 1, 0, ""),
                 (AGENT_ERROR, -1, 0, "!"), (AGENT_ERROR, 1, 0, "")]
@@ -551,7 +550,7 @@ class Office(tk.Canvas):
         for key, state, color in sorted(agents, key=lambda a: a[0]):
             zone = ("work" if state == "active" else
                     "bug" if state == "systemError" else
-                    "couch" if state == "notLoaded" else "lounge")
+                    "lounge" if state == "notLoaded" else "couch")
             if spots[zone]:
                 tx, ty = spots[zone].pop(0)
             elif zone in ("couch", "lounge") and (spots["couch"] or spots["lounge"]):
@@ -613,9 +612,8 @@ class Office(tk.Canvas):
                 grid, dy, overlay = (AGENT_FOCUS if i % 2 else AGENT_OPEN), i % 2, ""
             elif state == "systemError":  # 面壁 + X_X 晕眩眼 + 感叹号
                 grid, dy, overlay = AGENT_ERROR, 0, ("!" if i % 2 else "")
-            elif state == "notLoaded":  # 在沙发上睡觉
-                grid, dy = AGENT_CLOSED, 0
-                overlay = ("", "z", "z Z", "z Z z")[i % 4]
+            elif state == "notLoaded":  # 独立 app-server 无法确认运行态
+                grid, dy, overlay = AGENT_OPEN, 0, ("?" if i % 2 else "")
             else:  # 休息眨眼
                 grid, dy, overlay = (AGENT_CLOSED if i % 8 == 7 else AGENT_OPEN), 0, ""
             dx = (i % 2) * 2 - 1 if state == "systemError" and not a.get("moving") else 0
@@ -701,6 +699,7 @@ class Widget:
         self.last_data = {}
         self.team_stats = load_team_stats()
         self.last_sample: float | None = None
+        self.last_busy = False
         self.snapped: set[str] = set(prefs.get("snapped") or []) & {"left", "right", "top", "bottom"}
         load_sprites()
         self._build()
@@ -1099,7 +1098,11 @@ class Widget:
         self.task_summary.configure(text=f"最近任务 · {len(tasks)}")
         self._render_tasks(tasks, data)
         self._render_agents(agents, threads, data)
-        self._sample_team_stats(tasks, agents)
+        if not data.get("threads_error"):
+            self._sample_team_stats(tasks, agents)
+        else:
+            self.last_sample = None
+            self.last_busy = False
         self.memo.configure(text=self._memo_text())
 
     def _sample_team_stats(self, tasks: list, agents: list) -> None:
@@ -1107,13 +1110,17 @@ class Widget:
         today = time.strftime("%Y-%m-%d")
         rec = self.team_stats.setdefault(today, {"busy": 0, "peak": 0, "tasks": [], "agents": []})
         now = time.time()
+        day_start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        recent_tasks = [t for t in tasks if (t.get("recencyAt") or t.get("updatedAt") or 0) >= day_start]
+        recent_agents = [t for t in agents if (t.get("recencyAt") or t.get("updatedAt") or 0) >= day_start]
         busy = any((t.get("status") or {}).get("type") == "active" for t in tasks + agents)
-        if self.last_sample and busy:
+        if self.last_sample and self.last_busy and busy:
             rec["busy"] = rec.get("busy", 0) + int(min(now - self.last_sample, POLL_SECONDS * 2))
         self.last_sample = now
-        rec["peak"] = max(rec.get("peak", 0), len(agents))
-        rec["tasks"] = sorted(set(rec.get("tasks", [])) | {str(t["id"]) for t in tasks if t.get("id")})
-        rec["agents"] = sorted(set(rec.get("agents", [])) | {str(t["id"]) for t in agents if t.get("id")})
+        self.last_busy = busy
+        rec["peak"] = max(rec.get("peak", 0), len(recent_agents))
+        rec["tasks"] = sorted(set(rec.get("tasks", [])) | {str(t["id"]) for t in recent_tasks if t.get("id")})
+        rec["agents"] = sorted(set(rec.get("agents", [])) | {str(t["id"]) for t in recent_agents if t.get("id")})
         for day in sorted(self.team_stats)[:-7]:  # 只保留最近 7 天
             del self.team_stats[day]
         save_team_stats(self.team_stats)
@@ -1183,7 +1190,7 @@ class Widget:
         status_map = {
             "active": ("干活中", self.ACCENT),
             "idle": ("待命", self.MUTED),
-            "notLoaded": ("休息中", self.MUTED),
+            "notLoaded": ("状态未知", self.MUTED),
             "systemError": ("异常", "#efad83"),
         }
         agents = sorted(agents, key=lambda t: ((t.get("status") or {}).get("type") == "active",
