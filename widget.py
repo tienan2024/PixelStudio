@@ -224,6 +224,20 @@ def window_caption(window: dict | None, fallback: str) -> str:
     return f"{minutes:g} 分钟"
 
 
+def rel_time(ts: float) -> str:
+    """把秒/毫秒时间戳转成口语化的相对时间。"""
+    if ts > 1e12:
+        ts /= 1000
+    delta = max(0, time.time() - ts)
+    if delta < 60:
+        return "刚刚活跃"
+    if delta < 3600:
+        return f"{int(delta // 60)} 分钟前活跃"
+    if delta < 86400:
+        return f"{int(delta // 3600)} 小时前活跃"
+    return f"{int(delta // 86400)} 天前活跃"
+
+
 class Widget:
     BG = "#16191e"
     CARD = "#20242b"
@@ -380,13 +394,23 @@ class Widget:
             label = self.label(self.details, "—", fg=self.MUTED, size=8, wraplength=282)
             label.pack(fill="x", pady=(3, 0))
             self.task_rows.append(label)
-        self.agent_summary = self.label(self.details, "子代理 · 等待读取", bold=True, size=9)
+        self.agent_summary = self.label(self.details, "AI 团队 · 等待读取", bold=True, size=9)
         self.agent_summary.pack(fill="x", pady=(9, 0))
         self.agent_rows = []
-        for _ in range(2):
-            label = self.label(self.details, "—", fg=self.MUTED, size=8, wraplength=282)
-            label.pack(fill="x", pady=(3, 0))
-            self.agent_rows.append(label)
+        for _ in range(3):
+            card = tk.Frame(self.details, bg=self.CARD, padx=8, pady=5)
+            card.pack(fill="x", pady=(4, 0))
+            top = tk.Frame(card, bg=self.CARD)
+            top.pack(fill="x")
+            dot = self.label(top, "○", bg=self.CARD, fg=self.MUTED, size=9)
+            dot.pack(side="left")
+            name = self.label(top, "—", bg=self.CARD, bold=True, size=9)
+            name.pack(side="left", padx=(5, 0))
+            status = self.label(top, "", bg=self.CARD, size=8)
+            status.pack(side="right")
+            sub = self.label(card, "", bg=self.CARD, fg=self.MUTED, size=8, wraplength=270)
+            sub.pack(fill="x", pady=(2, 0))
+            self.agent_rows.append((card, dot, name, status, sub))
 
         self.footer = tk.Frame(outer, bg=self.BG)
         self.footer.pack(fill="x", padx=12, pady=(8, 8))
@@ -614,21 +638,73 @@ class Widget:
         agents = [t for t in threads if is_agent(t)]
         tasks = [t for t in threads if not is_agent(t)]
         self.task_summary.configure(text=f"最近任务 · {len(tasks)}")
-        self.agent_summary.configure(text=f"子代理 · {len(agents)}")
         labels = {"active": "运行中", "idle": "空闲", "notLoaded": "未加载", "systemError": "异常"}
-        for rows, entries, empty in ((self.task_rows, tasks, "暂无任务记录"), (self.agent_rows, agents, "暂无子代理记录")):
-            entries = sorted(entries, key=lambda t: ((t.get("status") or {}).get("type") == "active", t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
-            for i, label in enumerate(rows):
-                if i >= len(entries):
-                    label.configure(text=("状态读取失败" if data.get("threads_error") else empty) if i == 0 else "", fg=self.MUTED)
-                    continue
-                thread = entries[i]
-                state = (thread.get("status") or {}).get("type", "unknown")
-                name = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名任务"
-                name = " ".join(name.split())
-                if len(name) > 17:
-                    name = name[:16] + "…"
-                label.configure(text=f"{'●' if state == 'active' else '○'}  {name} · {labels.get(state, '未知')}", fg=self.ACCENT if state == "active" else self.MUTED)
+        tasks = sorted(tasks, key=lambda t: ((t.get("status") or {}).get("type") == "active", t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
+        for i, label in enumerate(self.task_rows):
+            if i >= len(tasks):
+                label.configure(text=("状态读取失败" if data.get("threads_error") else "暂无任务记录") if i == 0 else "", fg=self.MUTED)
+                continue
+            thread = tasks[i]
+            state = (thread.get("status") or {}).get("type", "unknown")
+            name = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名任务"
+            name = " ".join(name.split())
+            if len(name) > 17:
+                name = name[:16] + "…"
+            label.configure(text=f"{'●' if state == 'active' else '○'}  {name} · {labels.get(state, '未知')}", fg=self.ACCENT if state == "active" else self.MUTED)
+        self._render_agents(agents, threads, data)
+
+    def _render_agents(self, agents: list, threads: list, data: dict) -> None:
+        """马维斯风格的 AI 团队面板：成员卡片 + 口语化状态 + 角色/归属/活跃时间。"""
+        active = sum(1 for t in agents if (t.get("status") or {}).get("type") == "active")
+        self.agent_summary.configure(
+            text=f"AI 团队 · {active} 干活中 / 共 {len(agents)} 个" if agents else
+            ("AI 团队 · 状态读取失败" if data.get("threads_error") else "AI 团队 · 暂无成员"))
+        by_id = {t.get("id"): t for t in threads if t.get("id")}
+        status_map = {
+            "active": ("干活中", self.ACCENT),
+            "idle": ("待命", self.MUTED),
+            "notLoaded": ("休息中", self.MUTED),
+            "systemError": ("异常", "#efad83"),
+        }
+        agents = sorted(agents, key=lambda t: ((t.get("status") or {}).get("type") == "active",
+                                               t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
+        for i, (card, dot, name, status, sub) in enumerate(self.agent_rows):
+            if i >= len(agents):
+                if i == 0:
+                    card.pack(fill="x", pady=(4, 0))
+                    dot.configure(text="○", fg=self.MUTED)
+                    name.configure(text="状态读取失败" if data.get("threads_error") else "暂无团队成员", fg=self.MUTED)
+                    status.configure(text="")
+                    sub.configure(text="")
+                else:
+                    card.pack_forget()
+                continue
+            card.pack(fill="x", pady=(4, 0))
+            thread = agents[i]
+            state = (thread.get("status") or {}).get("type", "unknown")
+            state_text, color = status_map.get(state, ("未知", self.MUTED))
+            nm = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名成员"
+            nm = " ".join(str(nm).split())
+            if len(nm) > 14:
+                nm = nm[:13] + "…"
+            dot.configure(text="●", fg=color)
+            name.configure(text=nm, fg=self.TEXT)
+            status.configure(text=state_text, fg=color)
+            parts = []
+            role = thread.get("agentRole")
+            if role:
+                parts.append(str(role))
+            parent = by_id.get(thread.get("parentThreadId"))
+            if parent:
+                pn = parent.get("agentNickname") or parent.get("name") or "主任务"
+                pn = " ".join(str(pn).split())
+                if len(pn) > 12:
+                    pn = pn[:11] + "…"
+                parts.append(f"归属 {pn}")
+            ts = thread.get("recencyAt") or thread.get("updatedAt")
+            if isinstance(ts, (int, float)) and ts > 0:
+                parts.append(rel_time(ts))
+            sub.configure(text=" · ".join(parts) or " ")
         has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
         self.status.configure(text="部分数据不可用 · 自动重试" if has_error else f"{time.strftime('%H:%M:%S')} 更新 · 每 20 秒")
         self.resize()
