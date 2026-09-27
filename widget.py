@@ -714,6 +714,10 @@ class Widget:
         origin, target = self.world_progress, float(expanded)
         started = time.monotonic()
         duration = max(0.10, 0.42 * abs(target - origin))
+        # 顶层窗口一次定型：展开先开到最终尺寸（两翼透明不可见），
+        # 收起保持当前尺寸到动画结束；逐帧只动画布，避免窗口 resize 撕裂。
+        self._layout_world(apply_window=True,
+                           window_progress=target if expanded else origin)
 
         def step():
             self.world_animation = None
@@ -722,9 +726,11 @@ class Widget:
             t = min(1.0, (time.monotonic() - started) / duration)
             ease = 1 - (1 - t) ** 3
             self.world_progress = origin + (target - origin) * ease
-            self._layout_world()
+            self._layout_world(apply_window=False)
             if t < 1:
                 self.world_animation = self.root.after(16, step)
+            else:
+                self._layout_world(apply_window=True)  # 收尾定型
 
         step()
 
@@ -733,8 +739,13 @@ class Widget:
         # deliberately unaffected by scene interaction.
         self.world_view.focus_set()
 
-    def _layout_world(self):
-        """Keep the panel fixed on screen; only the scene's visible bounds grow."""
+    def _layout_world(self, *, apply_window=True, window_progress=None):
+        """Keep the panel fixed on screen; only the scene's visible bounds grow.
+
+        动画期间顶层窗口保持静止（apply_window=False）：窗口在动画开始时
+        一次开到目标尺寸，未覆盖区域是透明色不可见；逐帧只改画卷画布的
+        位置与宽度，避免逐帧 resize 窗口造成的竖直撕裂。
+        """
         if self.closing:
             return
         sw = self.root.winfo_screenwidth()
@@ -747,29 +758,42 @@ class Widget:
             slot_y += node.winfo_y()
             node = node.master
         compact = 294
-        maximum = max(compact, min(PixelWorld.WIDTH, sw - 2 * self.MARGIN))
-        maximum -= maximum % 2
-        width = compact + round((maximum - compact) * self.world_progress / 2) * 2
-        scene_x = panel_x + slot_x - (width - compact) // 2
-        margin = round(self.MARGIN * self.world_progress)
-        scene_x = max(margin, min(scene_x, sw - width - margin))
+
+        def geometry_for(p):
+            maximum = max(compact, min(PixelWorld.WIDTH, sw - 2 * self.MARGIN))
+            maximum -= maximum % 2
+            w = compact + round((maximum - compact) * p / 2) * 2
+            sx = panel_x + slot_x - (w - compact) // 2
+            margin = round(self.MARGIN * p)
+            return w, max(margin, min(sx, sw - w - margin))
+
+        width, scene_x = geometry_for(self.world_progress)
+        if apply_window:
+            wp = self.world_progress if window_progress is None else window_progress
+            win_w, win_scene_x = geometry_for(wp)
+            if self.collapsed:
+                root_x, root_right = panel_x, panel_x + self.WIDTH
+            else:
+                root_x = min(panel_x, win_scene_x)
+                root_right = max(panel_x + self.WIDTH, win_scene_x + win_w)
+            self.chrome.place_configure(x=panel_x - root_x, y=0, width=self.WIDTH, height=height)
+            self.root.geometry(f"{root_right - root_x}x{height}+{root_x}+{panel_y}")
+            self._root_x = root_x
         if self.collapsed:
-            root_x, root_right = panel_x, panel_x + self.WIDTH
             self.world_view.place_forget()
+            self._world_placed = False
         else:
-            root_x = min(panel_x, scene_x)
-            root_right = max(panel_x + self.WIDTH, scene_x + width)
-        self.chrome.place_configure(x=panel_x - root_x, y=0, width=self.WIDTH, height=height)
-        self.root.geometry(f"{root_right - root_x}x{height}+{root_x}+{panel_y}")
-        if not self.collapsed:
-            self.world_view.place(x=scene_x - root_x, y=slot_y, width=width, height=PixelWorld.HEIGHT)
+            self.world_view.place(x=scene_x - getattr(self, "_root_x", panel_x), y=slot_y,
+                                  width=width, height=PixelWorld.HEIGHT)
             self.world_view.set_viewport(
                 width, expanded=self.world_expanded,
                 left_bg=self.BG if panel_x <= scene_x <= panel_x + self.WIDTH - 12 else self.chrome_bg,
                 right_bg=self.BG if panel_x + 12 <= scene_x + width <= panel_x + self.WIDTH else self.chrome_bg,
             )
-            # Canvas.lift is a canvas-item method; explicitly lift the widget.
-            self.root.tk.call("raise", self.world_view._w)
+            if not getattr(self, "_world_placed", False):
+                # Canvas.lift is a canvas-item method; explicitly lift the widget.
+                self.root.tk.call("raise", self.world_view._w)
+                self._world_placed = True
 
     def resize(self):
         if self.layout_timer is not None:
