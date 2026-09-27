@@ -452,6 +452,49 @@ class RoundedCard(tk.Canvas):
         self.tag_lower("bg")
 
 
+class RoundedWindow(tk.Canvas):
+    """Window chrome with genuinely transparent corners on Windows."""
+
+    def __init__(self, parent, width, *, radius=14, bg, fill):
+        super().__init__(parent, width=width, height=1, bg=bg, highlightthickness=0, bd=0)
+        self.radius = radius
+        self.fill_color = fill
+        self.body = tk.Frame(self, bg=fill)
+        self._window = self.create_window(1, radius, anchor="nw", window=self.body)
+        self.body.bind("<Configure>", self._fit_height)
+        self.bind("<Configure>", self._redraw)
+
+    def _fit_height(self, _event=None):
+        height = self.body.winfo_reqheight() + 2 * self.radius
+        if int(self.cget("height")) != height:
+            self.configure(height=height)
+
+    def _rounded_rect(self, inset, radius, color):
+        w = self.winfo_width()
+        h = self.winfo_height()
+        x1, y1, x2, y2 = inset, inset, w - inset, h - inset
+        r = radius
+        for ax1, ay1, ax2, ay2, start in (
+            (x1, y1, x1 + 2*r, y1 + 2*r, 90),
+            (x2 - 2*r, y1, x2, y1 + 2*r, 0),
+            (x1, y2 - 2*r, x1 + 2*r, y2, 180),
+            (x2 - 2*r, y2 - 2*r, x2, y2, 270),
+        ):
+            self.create_arc(ax1, ay1, ax2, ay2, start=start, extent=90,
+                            style="pieslice", fill=color, outline="", tags="chrome")
+        self.create_rectangle(x1 + r, y1, x2 - r, y2,
+                              fill=color, outline="", tags="chrome")
+        self.create_rectangle(x1, y1 + r, x2, y2 - r,
+                              fill=color, outline="", tags="chrome")
+
+    def _redraw(self, _event=None):
+        self.delete("chrome")
+        self._rounded_rect(0, self.radius, "#3a3e45")
+        self._rounded_rect(1, self.radius - 1, self.fill_color)
+        self.itemconfigure(self._window, width=max(1, self.winfo_width() - 2))
+        self.tag_lower("chrome")
+
+
 class Office(tk.Canvas):
     """迷你像素办公室：子代理按状态走到工位、沙发或 Bug 区。
 
@@ -461,6 +504,8 @@ class Office(tk.Canvas):
     WALL = "#7c8fc0"
     FLOOR = "#a06830"
     INK = "#1c1c1c"      # 描边色
+    ROOM_WIDTH = 294
+    ROOM_HEIGHT = 124
     FLOOR_Y = 100
     WORK_SPOTS = ((72, 78), (104, 78), (136, 78))
     COUCH_SPOTS = ((214, 72), (246, 72))
@@ -471,7 +516,8 @@ class Office(tk.Canvas):
     COOLER_POS = (178, 68)
 
     def __init__(self, parent, bg):
-        super().__init__(parent, width=296, height=124, bg=bg, highlightthickness=0, bd=0)
+        super().__init__(parent, width=self.ROOM_WIDTH, height=self.ROOM_HEIGHT,
+                         bg=bg, highlightthickness=0, bd=0)
         self.actors: dict = {}
         self.frame = 0
         self._draw_room()
@@ -482,7 +528,7 @@ class Office(tk.Canvas):
         self.create_rectangle(x1, y1, x2, y2, fill=fill, outline="", tags=tag)
 
     def _draw_room(self):
-        W, H, r = 296, 124, 10
+        W, H, r = self.ROOM_WIDTH, self.ROOM_HEIGHT, 10
         wall = self.WALL
         for (x1, y1, x2, y2, start) in ((0, 0, 2 * r, 2 * r, 90), (W - 2 * r, 0, W, 2 * r, 0),
                                         (0, H - 2 * r, 2 * r, H, 180), (W - 2 * r, H - 2 * r, W, H, 270)):
@@ -581,6 +627,7 @@ class Office(tk.Canvas):
     def redraw_actors(self):
         self.delete("actor")
         self.delete("screen")
+        self.delete("corner-mask")
         self._draw_ambient()
         i = self.frame
         active_count = sum(1 for a in self.actors.values() if a["state"] == "active")
@@ -623,6 +670,23 @@ class Office(tk.Canvas):
                 self.create_text(a["x"] + 24, a["y"] - 8, text=overlay, anchor="e",
                                  fill="#fc5454" if state == "systemError" else "#f8f8f8",
                                  font=("Microsoft YaHei UI", 7, "bold"), tags="actor")
+        self._mask_corners()
+
+    def _mask_corners(self):
+        """Cover animated pixels outside the room's rounded outline."""
+        w, h, r = self.ROOM_WIDTH, self.ROOM_HEIGHT, 10
+        corners = (
+            ((0, 0), (r, r), (270, 180, -15), (r, 0)),
+            ((w, 0), (w-r, r), (270, 360, 15), (w-r, 0)),
+            ((w, h), (w-r, h-r), (0, 90, 15), (w, h-r)),
+            ((0, h), (r, h-r), (90, 180, 15), (r, h)),
+        )
+        for corner, center, (start, end, step), edge in corners:
+            arc = [(center[0] + r * math.cos(math.radians(deg)),
+                    center[1] + r * math.sin(math.radians(deg)))
+                   for deg in range(start, end + (1 if step > 0 else -1), step)]
+            self.create_polygon(corner, edge, *arc, fill=self["bg"],
+                                outline="", tags="corner-mask")
 
     def _draw_ambient(self):
         """横板场景氛围动画：昼夜窗外、真实挂钟、机柜 LED、睡觉的猫。"""
@@ -669,6 +733,7 @@ class Widget:
     MUTED = "#9199a5"
     ACCENT = "#99ddb6"
     WIDTH = 320
+    TRANSPARENT = "#010203"
     SNAP = 14      # 吸附触发距离（像素）
     MARGIN = 16    # 吸附后与屏幕左右/顶部的间距
     TASKBAR = 48   # 底部为任务栏预留的高度
@@ -686,6 +751,13 @@ class Widget:
         self.root.overrideredirect(True)
         self.root.resizable(False, False)
         self.root.configure(bg=self.BG)
+        self.chrome_bg = self.BG
+        try:
+            self.root.wm_attributes("-transparentcolor", self.TRANSPARENT)
+            self.root.configure(bg=self.TRANSPARENT)
+            self.chrome_bg = self.TRANSPARENT
+        except tk.TclError:
+            pass
         self.pinned = bool(prefs.get("pinned", True))
         self.collapsed = bool(prefs.get("collapsed", False))
         self.root.attributes("-topmost", self.pinned)
@@ -703,6 +775,8 @@ class Widget:
         self.snapped: set[str] = set(prefs.get("snapped") or []) & {"left", "right", "top", "bottom"}
         load_sprites()
         self._build()
+        self.root.update_idletasks()
+        self.chrome._fit_height()
         self.root.update_idletasks()
         height = self.root.winfo_reqheight()
         sw = self.root.winfo_screenwidth()
@@ -788,8 +862,9 @@ class Widget:
         self.root.after(280, self._tick)
 
     def _build(self) -> None:
-        outer = tk.Frame(self.root, bg=self.BG, highlightbackground="#3a3e45", highlightthickness=1)
-        outer.pack(fill="both", expand=True)
+        self.chrome = RoundedWindow(self.root, self.WIDTH, bg=self.chrome_bg, fill=self.BG)
+        self.chrome.pack(fill="both", expand=True)
+        outer = self.chrome.body
         header = tk.Frame(outer, bg=self.BG, cursor="fleur")
         header.pack(fill="x", padx=12, pady=(9, 7))
         title = self.label(header, "●  模型额度", fg=self.ACCENT, bold=True)
@@ -868,6 +943,8 @@ class Widget:
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
 
     def resize(self):
+        self.root.update_idletasks()
+        self.chrome._fit_height()
         self.root.update_idletasks()
         self.root.geometry(f"{self.WIDTH}x{self.root.winfo_reqheight()}")
         self.root.after_idle(self._resize_settle)
