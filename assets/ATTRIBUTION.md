@@ -1,6 +1,13 @@
 # 素材署名 / Asset Attribution
 
-本目录下的像素素材来自第三方开源作品，按许可证要求署名如下：
+本目录包含项目生成素材，以及保留的早期第三方开源素材。
+
+## PixelStudio 全景底图
+
+- `pixel-world.png`：2026-09-27 通过 Codex 内置 imagegen 为本项目生成；实际请求型号为 `gpt-image-2`。
+- 原始尺寸：2172×724；文件保留原始生成结果，运行时整数采样与视口裁切。
+- 完整提示词见 `pixel-world.prompt.txt`。
+- 实时成员及状态动画由程序单独绘制，生成底图不包含虚构代理。
 
 ## Office worker sprites
 

@@ -18,6 +18,8 @@ import time
 import tkinter as tk
 import urllib.request
 
+from pixel_world import PixelWorld
+
 
 HOME = Path.home()
 PREFERENCES = Path(__file__).resolve().parents[1] / ".runtime/widget-preferences.json"
@@ -384,42 +386,6 @@ class PixelSprite(tk.Canvas):
                              fill=self.overlay_color, font=("Microsoft YaHei UI", 7, "bold"))
 
 
-def draw_grid(canvas, grid, palette, x, y, scale, tag):
-    """在画布上按字符网格画像素块。"""
-    for r, row in enumerate(grid):
-        for c, ch in enumerate(row):
-            color = palette.get(ch)
-            if color:
-                x0 = x + c * scale
-                y0 = y + r * scale
-                canvas.create_rectangle(x0, y0, x0 + scale, y0 + scale, fill=color, outline="", tags=tag)
-
-
-# ---------------------------------------------------------------------------
-# 真实素材（CC-BY: emcee-flesher, OpenGameArt "Office worker sprites"）
-# ---------------------------------------------------------------------------
-
-ASSETS = Path(__file__).resolve().parent / "assets" / "frames"
-SPRITES: dict[str, list] = {}
-
-
-def load_sprites() -> None:
-    """加载 assets/frames 下的 PNG 帧（PhotoImage 需要 Tk root 已创建）。"""
-    if SPRITES or not ASSETS.is_dir():
-        return
-    groups: dict[str, list[tuple[int, tk.PhotoImage]]] = {}
-    for p in ASSETS.glob("*.png"):
-        stem, _, idx = p.stem.rpartition("_")
-        groups.setdefault(stem, []).append((int(idx), tk.PhotoImage(file=str(p))))
-    for stem, frames in groups.items():
-        SPRITES[stem] = [img for _, img in sorted(frames)]
-
-
-def sprite(name: str, i: int):
-    """取一组帧中的第 i 帧（循环）；素材缺失时返回 None 走手绘兜底。"""
-    frames = SPRITES.get(name)
-    return frames[i % len(frames)] if frames else None
-
 
 class RoundedCard(tk.Canvas):
     """圆角卡片容器：内容放进 .body，圆角背景自动跟随尺寸。"""
@@ -495,237 +461,6 @@ class RoundedWindow(tk.Canvas):
         self.tag_lower("chrome")
 
 
-class Office(tk.Canvas):
-    """迷你像素办公室：子代理按状态走到工位、沙发或 Bug 区。
-
-    房间家具与职员素材统一为 NES 卡通风：鲜亮平涂 + 黑色描边。
-    """
-
-    WALL = "#7c8fc0"
-    FLOOR = "#a06830"
-    INK = "#1c1c1c"      # 描边色
-    ROOM_WIDTH = 294
-    ROOM_HEIGHT = 124
-    FLOOR_Y = 100
-    WORK_SPOTS = ((72, 78), (104, 78), (136, 78))
-    COUCH_SPOTS = ((214, 72), (246, 72))
-    COFFEE_SPOT = (148, 78)
-    BUG_SPOTS = ((34, 78), (44, 88))
-    SPAWN = (8, 78)
-    COMPUTERS = ((80, 40), (116, 40))
-    COOLER_POS = (178, 68)
-
-    def __init__(self, parent, bg):
-        super().__init__(parent, width=self.ROOM_WIDTH, height=self.ROOM_HEIGHT,
-                         bg=bg, highlightthickness=0, bd=0)
-        self.actors: dict = {}
-        self.frame = 0
-        self._draw_room()
-
-    def _obox(self, x1, y1, x2, y2, fill, tag="bg", w=1):
-        """带黑色描边的实心方块（NES 卡通家具的基本件）。"""
-        self.create_rectangle(x1 - w, y1 - w, x2 + w, y2 + w, fill=self.INK, outline="", tags=tag)
-        self.create_rectangle(x1, y1, x2, y2, fill=fill, outline="", tags=tag)
-
-    def _draw_room(self):
-        W, H, r = self.ROOM_WIDTH, self.ROOM_HEIGHT, 10
-        wall = self.WALL
-        for (x1, y1, x2, y2, start) in ((0, 0, 2 * r, 2 * r, 90), (W - 2 * r, 0, W, 2 * r, 0),
-                                        (0, H - 2 * r, 2 * r, H, 180), (W - 2 * r, H - 2 * r, W, H, 270)):
-            self.create_arc(x1, y1, x2, y2, start=start, extent=90, style="pieslice",
-                            fill=wall, outline="", tags="bg")
-        self.create_rectangle(r, 0, W - r, H, fill=wall, outline="", tags="bg")
-        self.create_rectangle(0, r, W, H - r, fill=wall, outline="", tags="bg")
-        # 木地板（拼板缝 + 踢脚线）
-        self.create_rectangle(4, self.FLOOR_Y, W - 4, H - 4, fill=self.FLOOR, outline="", tags="bg")
-        self.create_rectangle(4, self.FLOOR_Y, W - 4, self.FLOOR_Y + 2, fill=self.INK, outline="", tags="bg")
-        for x in range(20, W - 4, 16):
-            self.create_line(x, self.FLOOR_Y + 2, x, H - 4, fill="#7a4f28", tags="bg")
-        self.create_line(4, (self.FLOOR_Y + H - 4) // 2, W - 4, (self.FLOOR_Y + H - 4) // 2,
-                         fill="#7a4f28", tags="bg")
-        # 吊灯（黄色灯罩）
-        for cx in (110, 240):
-            self.create_line(cx, 0, cx, 6, fill=self.INK, tags="bg")
-            self._obox(cx - 6, 6, cx + 6, 12, "#f8c838")
-            self.create_rectangle(cx - 2, 13, cx + 2, 15, fill="#f8f878", outline="", tags="bg")
-        # 窗户（天空每帧按真实时间重绘，dyn 层补天空）
-        self._obox(70, 12, 104, 40, "#0d0f12", w=2)
-        # 挂钟（白盘黑框，指针每帧按真实时间重绘）
-        self._obox(162, 14, 176, 28, "#f8f8f8", w=2)
-        # 海报（白纸黑框）
-        self._obox(30, 12, 52, 34, "#f8f0d8", w=2)
-        self.create_text(41, 23, text="AI", fill="#d83838", font=("Microsoft YaHei UI", 8, "bold"), tags="bg")
-        # 书架与彩色书脊
-        self._obox(216, 28, 280, 34, "#8a5a28")
-        for i, color in enumerate(("#d83838", "#38a838", "#3c7cfc", "#f8c838")):
-            self._obox(220 + i * 14, 18, 230 + i * 14, 28, color)
-        # 门（木门 + 门板 + 金色把手，新成员从这里进来）
-        self._obox(4, 54, 24, 100, "#8a5a28", w=2)
-        self._obox(8, 58, 20, 76, "#6f4720")
-        self._obox(8, 80, 20, 98, "#6f4720")
-        self.create_rectangle(16, 76, 19, 80, fill="#f8c838", outline=self.INK, tags="bg")
-        # 服务器机柜（LED 每帧闪烁）
-        self._obox(30, 50, 56, 100, "#40485c", w=2)
-        for i in range(4):
-            self._obox(33, 54 + i * 12, 53, 62 + i * 12, "#2b3140")
-        # 办公桌（木桌 + 粗桌腿）
-        self._obox(66, 66, 158, 72, "#b87a3e", w=2)
-        self._obox(70, 72, 76, 100, "#8a5a28")
-        self._obox(148, 72, 154, 100, "#8a5a28")
-        # 桌前地毯（猫睡这里）
-        self._obox(62, 100, 162, 106, "#d8b038")
-        # 绿植（花盆 + 圆叶）
-        self._obox(162, 88, 174, 100, "#c05830")
-        self._obox(164, 76, 172, 88, "#38a838")
-        self._obox(166, 72, 170, 78, "#38a838")
-        # 沙发（绿色双人沙发）
-        self._obox(210, 64, 274, 78, "#48a858", w=2)   # 靠背
-        self._obox(206, 76, 278, 94, "#58b868", w=2)   # 坐垫
-        self.create_line(242, 78, 242, 92, fill=self.INK, tags="bg")  # 坐垫中缝
-        self._obox(206, 94, 210, 100, "#8a5a28")       # 木腿
-        self._obox(274, 94, 278, 100, "#8a5a28")
-        # Bug 区地毯（在机柜前面壁思过）
-        self._obox(28, 106, 58, 112, "#b04848")
-
-    def update_agents(self, agents):
-        """agents: [(key, state, color)]，为每个成员分配目标位置。"""
-        spots = {"work": list(self.WORK_SPOTS), "bug": list(self.BUG_SPOTS),
-                 "couch": list(self.COUCH_SPOTS), "lounge": [self.COFFEE_SPOT]}
-        overflow = 0
-        new = {}
-        for key, state, color in sorted(agents, key=lambda a: a[0]):
-            zone = ("work" if state == "active" else
-                    "bug" if state == "systemError" else
-                    "lounge" if state == "notLoaded" else "couch")
-            if spots[zone]:
-                tx, ty = spots[zone].pop(0)
-            elif zone in ("couch", "lounge") and (spots["couch"] or spots["lounge"]):
-                alt = "couch" if spots["couch"] else "lounge"
-                tx, ty = spots[alt].pop(0)
-            else:  # 工位满了就在绿植旁排队
-                tx, ty = 150 + 20 * overflow, 92
-                overflow += 1
-            actor = self.actors.get(key) or {"x": self.SPAWN[0], "y": self.SPAWN[1], "frame_i": 0}
-            actor.update(tx=tx, ty=ty, state=state, color=color, zone=zone)
-            new[key] = actor
-        self.actors = new
-        self.redraw_actors()
-
-    def advance(self):
-        self.frame += 1
-        for a in self.actors.values():
-            moving = False
-            for axis in ("x", "y"):
-                d = a["t" + axis] - a[axis]
-                if d:
-                    a[axis] = a["t" + axis] if abs(d) <= 3 else a[axis] + (3 if d > 0 else -3)
-                    moving = True
-            a["moving"] = moving
-            a["frame_i"] += 1
-        self.redraw_actors()
-
-    def redraw_actors(self):
-        self.delete("actor")
-        self.delete("screen")
-        self.delete("corner-mask")
-        self._draw_ambient()
-        i = self.frame
-        active_count = sum(1 for a in self.actors.values() if a["state"] == "active")
-        has_error = any(a["state"] == "systemError" for a in self.actors.values())
-        # 复古电脑：有人干活就亮屏跑动画，报错切错误屏，没人用就黑屏
-        for n, (cx, cy) in enumerate(self.COMPUTERS):
-            if has_error:
-                img = sprite("pc_err", i + n)
-            elif n < active_count:
-                img = sprite("pc_on", i + n)
-            else:
-                img = sprite("pc_off", 0)
-            if img is not None:
-                self.create_image(cx, cy, image=img, anchor="nw", tags="screen")
-            else:
-                self.create_rectangle(cx, cy, cx + 32, cy + 32, fill="#0d0f12",
-                                      outline="#3a4150", tags="screen")
-        # 饮水机（素材自带水泡动画）
-        img = sprite("cooler", i)
-        if img is not None:
-            self.create_image(self.COOLER_POS[0], self.COOLER_POS[1], image=img,
-                              anchor="nw", tags="screen")
-        for key, a in sorted(self.actors.items()):
-            i = a["frame_i"]
-            state = a["state"]
-            if a.get("moving"):  # 走路：摆臂 + 上下颠
-                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), -(i % 2), ""
-            elif state == "active":  # 在工位专注打字（-_- 眼）
-                grid, dy, overlay = (AGENT_FOCUS if i % 2 else AGENT_OPEN), i % 2, ""
-            elif state == "systemError":  # 面壁 + X_X 晕眩眼 + 感叹号
-                grid, dy, overlay = AGENT_ERROR, 0, ("!" if i % 2 else "")
-            elif state == "notLoaded":  # 独立 app-server 无法确认运行态
-                grid, dy, overlay = AGENT_OPEN, 0, ("?" if i % 2 else "")
-            else:  # 休息眨眼
-                grid, dy, overlay = (AGENT_CLOSED if i % 8 == 7 else AGENT_OPEN), 0, ""
-            dx = (i % 2) * 2 - 1 if state == "systemError" and not a.get("moving") else 0
-            draw_grid(self, grid, {"K": self.INK, "C": a["color"], "W": "#f8f8f8"},
-                      a["x"] + dx, a["y"] + dy, 2, "actor")
-            if overlay:
-                self.create_text(a["x"] + 24, a["y"] - 8, text=overlay, anchor="e",
-                                 fill="#fc5454" if state == "systemError" else "#f8f8f8",
-                                 font=("Microsoft YaHei UI", 7, "bold"), tags="actor")
-        self._mask_corners()
-
-    def _mask_corners(self):
-        """Cover animated pixels outside the room's rounded outline."""
-        w, h, r = self.ROOM_WIDTH, self.ROOM_HEIGHT, 10
-        corners = (
-            ((0, 0), (r, r), (270, 180, -15), (r, 0)),
-            ((w, 0), (w-r, r), (270, 360, 15), (w-r, 0)),
-            ((w, h), (w-r, h-r), (0, 90, 15), (w, h-r)),
-            ((0, h), (r, h-r), (90, 180, 15), (r, h)),
-        )
-        for corner, center, (start, end, step), edge in corners:
-            arc = [(center[0] + r * math.cos(math.radians(deg)),
-                    center[1] + r * math.sin(math.radians(deg)))
-                   for deg in range(start, end + (1 if step > 0 else -1), step)]
-            self.create_polygon(corner, edge, *arc, fill=self["bg"],
-                                outline="", tags="corner-mask")
-
-    def _draw_ambient(self):
-        """横板场景氛围动画：昼夜窗外、真实挂钟、机柜 LED、睡觉的猫。"""
-        self.delete("dyn")
-        i = self.frame
-        # 窗外：白天出太阳，夜晚星星月亮
-        day = 6 <= time.localtime().tm_hour < 18
-        self.create_rectangle(73, 15, 101, 37, fill="#5cb8fc" if day else "#1c2440", outline="", tags="dyn")
-        if day:
-            self.create_rectangle(92, 18, 97, 23, fill="#f8f878", outline=self.INK, tags="dyn")
-        else:
-            self.create_rectangle(92, 18, 96, 22, fill="#f8f8f8", outline=self.INK, tags="dyn")
-            for sx, sy in ((76, 18), (82, 30), (88, 24), (78, 33)):
-                self.create_rectangle(sx, sy, sx + 1, sy + 1, fill="#f8f8f8", outline="", tags="dyn")
-        self.create_line(87, 15, 87, 37, fill=self.INK, tags="dyn")
-        # 挂钟：真实时间
-        t = time.localtime()
-        cx, cy = 169, 21
-        for angle, length, color in (((t.tm_hour % 12 + t.tm_min / 60) * 30 - 90, 3, self.INK),
-                                     (t.tm_min * 6 - 90, 5, "#687cae")):
-            rad = math.radians(angle)
-            self.create_line(cx, cy, cx + length * math.cos(rad), cy + length * math.sin(rad),
-                             fill=color, tags="dyn")
-        # 服务器机柜 LED 闪烁
-        for slot in range(4):
-            for led in range(2):
-                on = (i + slot + led) % (2 + led) == 0
-                self.create_rectangle(49 + led * 3, 56 + slot * 12, 51 + led * 3, 58 + slot * 12,
-                                      fill=("#54fc54" if led == 0 else "#fc5454") if on else "#1c2230",
-                                      outline="", tags="dyn")
-        # 地毯上睡觉的猫：尾巴摆动
-        self._obox(66, 94, 76, 99, "#b8b8b8", tag="dyn")
-        self._obox(66, 91, 71, 95, "#b8b8b8", tag="dyn")
-        if (i // 5) % 2 == 0:
-            self._obox(76, 90, 78, 95, "#b8b8b8", tag="dyn")
-        else:
-            self._obox(76, 95, 79, 97, "#b8b8b8", tag="dyn")
-
-
 class Widget:
     BG = "#16191e"
     CARD = "#20242b"
@@ -769,16 +504,23 @@ class Widget:
         self.closing = False
         self.refresh_timer = None
         self.last_data = {}
+        self.world_expanded = False
+        self.world_progress = 0.0
+        self.world_animation = None
+        self.layout_timer = None
+        self.panel_x = 0
+        self.panel_y = 0
+        self.panel_height = 1
+        self.current_agents = []
         self.team_stats = load_team_stats()
         self.last_sample: float | None = None
         self.last_busy = False
         self.snapped: set[str] = set(prefs.get("snapped") or []) & {"left", "right", "top", "bottom"}
-        load_sprites()
         self._build()
         self.root.update_idletasks()
         self.chrome._fit_height()
         self.root.update_idletasks()
-        height = self.root.winfo_reqheight()
+        height = self.chrome.winfo_reqheight()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         self._screen = (sw, sh)
@@ -811,7 +553,8 @@ class Widget:
                 y = max(0, min(y, max(0, sh - height)))
         except (ValueError, TypeError):
             x, y = max_x, 80
-        self.root.geometry(f"{self.WIDTH}x{height}+{x}+{y}")
+        self.panel_x, self.panel_y, self.panel_height = x, y, height
+        self._layout_world()
         self.root.deiconify()
         self.root.after(200, self._drain)
         self.root.after(1500, self._watch_screen)
@@ -858,12 +601,13 @@ class Widget:
         for rows in (self.task_rows, self.agent_rows):
             for row in rows:
                 row[1].advance()
-        self.office.advance()
+        if not self.collapsed:
+            self.world_view.advance()
         self.root.after(280, self._tick)
 
     def _build(self) -> None:
         self.chrome = RoundedWindow(self.root, self.WIDTH, bg=self.chrome_bg, fill=self.BG)
-        self.chrome.pack(fill="both", expand=True)
+        self.chrome.place(x=0, y=0, width=self.WIDTH)
         outer = self.chrome.body
         header = tk.Frame(outer, bg=self.BG, cursor="fleur")
         header.pack(fill="x", padx=12, pady=(9, 7))
@@ -928,10 +672,19 @@ class Widget:
         self.task_summary = self.label(self.details, "最近任务", bold=True, size=9)
         self.task_summary.pack(fill="x")
         self.task_rows = [self._member_card(self.details) for _ in range(3)]
-        self.agent_summary = self.label(self.details, "AI 团队 · 等待读取", bold=True, size=9)
-        self.agent_summary.pack(fill="x", pady=(9, 0))
-        self.office = Office(self.details, self.BG)
-        self.office.pack(pady=(6, 0))
+        team_header = tk.Frame(self.details, bg=self.BG)
+        team_header.pack(fill="x", pady=(9, 0))
+        self.agent_summary = self.label(team_header, "AI 团队 · 等待读取", bold=True, size=9)
+        self.agent_summary.pack(side="left")
+        self.world_button = self.button(team_header, "展开画卷", self.toggle_world)
+        # The slot participates in the narrow column's layout. The real canvas is
+        # a sibling of the chrome so it can unroll beyond that column's bounds.
+        self.world_slot = tk.Frame(self.details, width=294, height=PixelWorld.HEIGHT, bg=self.BG)
+        self.world_slot.pack(pady=(6, 0))
+        self.world_slot.pack_propagate(False)
+        self.world_view = PixelWorld(self.root, bg=self.chrome_bg,
+                                     on_toggle=self.toggle_world, on_select=self._world_select)
+        self.root.bind("<Escape>", lambda _event: self.close_world())
         self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
         self.memo.pack(fill="x", pady=(4, 0))
         self.agent_rows = [self._member_card(self.details) for _ in range(3)]
@@ -942,32 +695,123 @@ class Widget:
         self.status.pack(side="left")
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
 
+    def toggle_world(self):
+        if self.collapsed or self.closing:
+            return
+        self.world_view.focus_set()
+        self._animate_world(not self.world_expanded)
+
+    def open_world(self):
+        if not self.collapsed and not self.closing:
+            self._animate_world(True)
+
+    def close_world(self, *, immediate=False):
+        if self.world_animation is not None:
+            self.root.after_cancel(self.world_animation)
+            self.world_animation = None
+        if immediate or self.closing:
+            self.world_expanded = False
+            self.world_progress = 0.0
+            self.world_button.configure(text="展开画卷")
+            return
+        self._animate_world(False)
+
+    def _animate_world(self, expanded):
+        if self.world_animation is not None:
+            self.root.after_cancel(self.world_animation)
+            self.world_animation = None
+        self.world_expanded = expanded
+        self.world_button.configure(text="收起画卷" if expanded else "展开画卷")
+        origin, target = self.world_progress, float(expanded)
+        started = time.monotonic()
+        duration = max(0.10, 0.42 * abs(target - origin))
+
+        def step():
+            self.world_animation = None
+            if self.closing or self.collapsed:
+                return
+            t = min(1.0, (time.monotonic() - started) / duration)
+            ease = 1 - (1 - t) ** 3
+            self.world_progress = origin + (target - origin) * ease
+            self._layout_world()
+            if t < 1:
+                self.world_animation = self.root.after(16, step)
+
+        step()
+
+    def _world_select(self, actor):
+        # Member identity is shown inside the canvas; the quota/task column is
+        # deliberately unaffected by scene interaction.
+        self.world_view.focus_set()
+
+    def _layout_world(self):
+        """Keep the panel fixed on screen; only the scene's visible bounds grow."""
+        if self.closing:
+            return
+        sw = self.root.winfo_screenwidth()
+        height = self.panel_height
+        panel_x, panel_y = self.panel_x, self.panel_y
+        slot_x = slot_y = 0
+        node = self.world_slot
+        while node is not self.chrome:
+            slot_x += node.winfo_x()
+            slot_y += node.winfo_y()
+            node = node.master
+        compact = 294
+        maximum = max(compact, min(PixelWorld.WIDTH, sw - 2 * self.MARGIN))
+        maximum -= maximum % 2
+        width = compact + round((maximum - compact) * self.world_progress / 2) * 2
+        scene_x = panel_x + slot_x - (width - compact) // 2
+        margin = round(self.MARGIN * self.world_progress)
+        scene_x = max(margin, min(scene_x, sw - width - margin))
+        if self.collapsed:
+            root_x, root_right = panel_x, panel_x + self.WIDTH
+            self.world_view.place_forget()
+        else:
+            root_x = min(panel_x, scene_x)
+            root_right = max(panel_x + self.WIDTH, scene_x + width)
+        self.chrome.place_configure(x=panel_x - root_x, y=0, width=self.WIDTH, height=height)
+        self.root.geometry(f"{root_right - root_x}x{height}+{root_x}+{panel_y}")
+        if not self.collapsed:
+            self.world_view.place(x=scene_x - root_x, y=slot_y, width=width, height=PixelWorld.HEIGHT)
+            self.world_view.set_viewport(
+                width, expanded=self.world_expanded,
+                left_bg=self.BG if panel_x <= scene_x <= panel_x + self.WIDTH - 12 else self.chrome_bg,
+                right_bg=self.BG if panel_x + 12 <= scene_x + width <= panel_x + self.WIDTH else self.chrome_bg,
+            )
+            # Canvas.lift is a canvas-item method; explicitly lift the widget.
+            self.root.tk.call("raise", self.world_view._w)
+
     def resize(self):
+        if self.layout_timer is not None:
+            self.root.after_cancel(self.layout_timer)
+            self.layout_timer = None
         self.root.update_idletasks()
         self.chrome._fit_height()
         self.root.update_idletasks()
-        self.root.geometry(f"{self.WIDTH}x{self.root.winfo_reqheight()}")
-        self.root.after_idle(self._resize_settle)
+        self.panel_height = self.chrome.winfo_reqheight()
+        self._resize_settle()
+        self.layout_timer = self.root.after_idle(self._resize_settle)
 
     def _resize_settle(self):
-        """Configure 事件（圆角卡片高度回写）处理完后，按最终内容高度再校一次。"""
+        """Settle card height changes before positioning the scene slot."""
         if self.closing:
             return
+        self.layout_timer = None
         self.root.update_idletasks()
-        height = self.root.winfo_reqheight()
-        if height != self.root.winfo_height():
-            self.root.geometry(f"{self.WIDTH}x{height}")
+        self.panel_height = self.chrome.winfo_reqheight()
         if "bottom" in self.snapped:
-            # 高度变化（折叠/展开）后保持底边吸附
-            y = max(0, self.root.winfo_screenheight() - height - self.TASKBAR)
-            self.root.geometry(f"+{self.root.winfo_x()}+{y}")
+            self.panel_y = max(0, self.root.winfo_screenheight() - self.panel_height - self.TASKBAR)
+        else:
+            self.panel_y = max(0, min(self.panel_y, self.root.winfo_screenheight() - self.panel_height))
+        self._layout_world()
 
     def snap_position(self, x: int, y: int) -> tuple[int, int, set[str]]:
         """把候选位置吸附到桌面边缘或水平中线，返回 (x, y, 吸附边集合)。"""
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        w = self.root.winfo_width() or self.WIDTH
-        h = self.root.winfo_height() or 1
+        w = self.WIDTH
+        h = self.panel_height
         left = self.MARGIN
         right = max(self.MARGIN, sw - w - self.MARGIN)
         top = self.MARGIN
@@ -990,14 +834,15 @@ class Widget:
         return max(0, min(x, max(0, sw - w))), max(0, min(y, max(0, sh - h))), snapped
 
     def drag_start(self, event):
-        self.drag_origin = (event.x_root, event.y_root, self.root.winfo_x(), self.root.winfo_y())
+        self.drag_origin = (event.x_root, event.y_root, self.panel_x, self.panel_y)
 
     def drag_move(self, event):
         sx, sy, x, y = self.drag_origin
         x += event.x_root - sx
         y += event.y_root - sy
         x, y, self.snapped = self.snap_position(x, y)
-        self.root.geometry(f"+{x}+{y}")
+        self.panel_x, self.panel_y = x, y
+        self._layout_world()
 
     def drag_end(self, _event):
         self.save()
@@ -1011,9 +856,9 @@ class Widget:
         if (sw, sh) != self._screen:
             old_sw, old_sh = self._screen
             self._screen = (sw, sh)
-            w = self.root.winfo_width() or self.WIDTH
-            h = self.root.winfo_height() or 1
-            x, y = self.root.winfo_x(), self.root.winfo_y()
+            w = self.WIDTH
+            h = self.panel_height
+            x, y = self.panel_x, self.panel_y
             if "left" in self.snapped:
                 nx = self.MARGIN
             elif "right" in self.snapped:
@@ -1028,7 +873,8 @@ class Widget:
                 ny = round(y / max(1, old_sh - h) * max(0, sh - h))
             nx = max(0, min(nx, max(0, sw - w)))
             ny = max(0, min(ny, max(0, sh - h)))
-            self.root.geometry(f"+{nx}+{ny}")
+            self.panel_x, self.panel_y = nx, ny
+            self._layout_world()
             self.save()
         self.root.after(1500, self._watch_screen)
 
@@ -1036,6 +882,7 @@ class Widget:
         self.collapsed = not self.collapsed
         self.fold_button.configure(text="展开" if self.collapsed else "收起")
         if self.collapsed:
+            self.close_world(immediate=True)
             self.details.pack_forget()
         else:
             self.details.pack(fill="x", padx=12, pady=(8, 0), before=self.footer)
@@ -1052,9 +899,9 @@ class Widget:
         try:
             sw = self.root.winfo_screenwidth()
             sh = self.root.winfo_screenheight()
-            w = self.root.winfo_width() or self.WIDTH
-            h = self.root.winfo_height() or 1
-            x, y = self.root.winfo_x(), self.root.winfo_y()
+            w = self.WIDTH
+            h = self.panel_height
+            x, y = self.panel_x, self.panel_y
             PREFERENCES.parent.mkdir(parents=True, exist_ok=True)
             PREFERENCES.write_text(json.dumps({
                 "x": x, "y": y,
@@ -1259,9 +1106,8 @@ class Widget:
 
     def _render_agents(self, agents: list, threads: list, data: dict) -> None:
         """马维斯风格的 AI 团队面板：成员卡片 + 口语化状态 + 角色/归属/活跃时间。"""
-        active = sum(1 for t in agents if (t.get("status") or {}).get("type") == "active")
         self.agent_summary.configure(
-            text=f"AI 团队 · {active} 干活中 / 共 {len(agents)} 个" if agents else
+            text=f"AI 团队 · {len(agents)} 位成员" if agents else
             ("AI 团队 · 状态读取失败" if data.get("threads_error") else "AI 团队 · 暂无成员"))
         by_id = {t.get("id"): t for t in threads if t.get("id")}
         status_map = {
@@ -1312,12 +1158,8 @@ class Widget:
             if isinstance(ts, (int, float)) and ts > 0:
                 parts.append(rel_time(ts))
             sub.configure(text=" · ".join(parts) or " ")
-        self.office.update_agents([
-            (str(t.get("id") or t.get("agentNickname") or t.get("name") or f"agent{i}"),
-             (t.get("status") or {}).get("type", "unknown"),
-             status_map.get((t.get("status") or {}).get("type", "unknown"), ("", self.MUTED))[1])
-            for i, t in enumerate(agents)
-        ])
+        self.current_agents = agents
+        self.world_view.set_agents(agents)
         has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
         self.status.configure(text="部分数据不可用 · 自动重试" if has_error else f"{time.strftime('%H:%M:%S')} 更新 · 每 20 秒")
         self.resize()
@@ -1327,6 +1169,9 @@ class Widget:
             return
         self.closing = True
         self.save()
+        self.close_world(immediate=True)
+        if self.layout_timer is not None:
+            self.root.after_cancel(self.layout_timer)
         self.client.stopped = True
         self.client.close()
         self.root.destroy()
