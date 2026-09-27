@@ -394,7 +394,7 @@ class RoundedCard(tk.Canvas):
     """圆角卡片容器：内容放进 .body，圆角背景自动跟随尺寸。"""
 
     def __init__(self, parent, radius=9, bg="#16191e", fill="#20242b"):
-        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
+        super().__init__(parent, width=1, height=1, bg=bg, highlightthickness=0, bd=0)
         self.radius = radius
         self.fill_color = fill
         self.body = tk.Frame(self, bg=fill)
@@ -741,8 +741,17 @@ class Widget:
 
     def resize(self):
         self.root.update_idletasks()
+        self.root.geometry(f"{self.WIDTH}x{self.root.winfo_reqheight()}")
+        self.root.after_idle(self._resize_settle)
+
+    def _resize_settle(self):
+        """Configure 事件（圆角卡片高度回写）处理完后，按最终内容高度再校一次。"""
+        if self.closing:
+            return
+        self.root.update_idletasks()
         height = self.root.winfo_reqheight()
-        self.root.geometry(f"{self.WIDTH}x{height}")
+        if height != self.root.winfo_height():
+            self.root.geometry(f"{self.WIDTH}x{height}")
         if "bottom" in self.snapped:
             # 高度变化（折叠/展开）后保持底边吸附
             y = max(0, self.root.winfo_screenheight() - height - self.TASKBAR)
