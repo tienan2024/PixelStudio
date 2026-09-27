@@ -1,0 +1,175 @@
+{
+  "id": "lounge",
+  "label": "休闲厅",
+  "width": 560,
+  "arrival": 273,
+  "background": "lounge-shell.png",
+  "objects": [
+    {
+      "id": "lounge-rug",
+      "asset": "rug",
+      "label": "休闲地毯",
+      "x": 234,
+      "y": 198,
+      "size": [
+        218,
+        52
+      ],
+      "layer": 0,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "暖色织纹，脚下柔软"
+    },
+    {
+      "id": "lounge-books",
+      "asset": "bookcase",
+      "label": "闲读书架",
+      "x": 48,
+      "y": 180,
+      "size": [
+        68,
+        110
+      ],
+      "layer": 20,
+      "interaction": "cycle",
+      "states": [
+        "旅行手记",
+        "像素画册",
+        "科幻小说"
+      ]
+    },
+    {
+      "id": "coffee-table",
+      "asset": "nightstand",
+      "label": "咖啡边柜",
+      "x": 120,
+      "y": 180,
+      "size": [
+        54,
+        54
+      ],
+      "layer": 20,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "咖啡机是独立物品"
+    },
+    {
+      "id": "coffee-machine",
+      "asset": "coffee",
+      "label": "咖啡机",
+      "x": 120,
+      "y": 135,
+      "size": [
+        41,
+        49
+      ],
+      "layer": 25,
+      "interaction": "pulse",
+      "states": [
+        "等待冲煮",
+        "正在冲咖啡"
+      ],
+      "effect": "coffee",
+      "duration": 6
+    },
+    {
+      "id": "lounge-sofa",
+      "asset": "sofa",
+      "label": "绿色沙发",
+      "x": 259,
+      "y": 180,
+      "size": [
+        165,
+        85
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "软软的靠垫",
+        "靠垫轻轻回弹"
+      ],
+      "duration": 3,
+      "effect": "sofa"
+    },
+    {
+      "id": "lounge-cat",
+      "asset": "cat",
+      "label": "橘猫",
+      "x": 265,
+      "y": 129,
+      "size": [
+        39,
+        29
+      ],
+      "layer": 30,
+      "interaction": "pulse",
+      "states": [
+        "蜷着打盹",
+        "呼噜呼噜"
+      ],
+      "duration": 5,
+      "effect": "cat"
+    },
+    {
+      "id": "lounge-plant",
+      "asset": "plant",
+      "label": "龟背竹",
+      "x": 348,
+      "y": 181,
+      "size": [
+        47,
+        72
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "叶片舒展",
+        "浇水中"
+      ],
+      "effect": "water",
+      "duration": 4
+    },
+    {
+      "id": "lounge-aquarium",
+      "asset": "aquarium",
+      "label": "鱼缸",
+      "x": 413,
+      "y": 182,
+      "size": [
+        99,
+        112
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "安静游动",
+        "鱼儿开饭了"
+      ],
+      "effect": "aquarium",
+      "duration": 6
+    },
+    {
+      "id": "lounge-arcade",
+      "asset": "arcade",
+      "label": "街机",
+      "x": 510,
+      "y": 183,
+      "size": [
+        55,
+        112
+      ],
+      "layer": 20,
+      "interaction": "toggle",
+      "states": [
+        "屏幕关闭",
+        "像素星空"
+      ],
+      "default": 1,
+      "effect": "arcade"
+    }
+  ]
+}

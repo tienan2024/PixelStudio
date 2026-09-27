@@ -1,0 +1,209 @@
+{
+  "id": "studio",
+  "label": "工作室",
+  "width": 560,
+  "arrival": 282,
+  "background": "studio-shell.png",
+  "objects": [
+    {
+      "id": "studio-rug",
+      "asset": "rug",
+      "label": "编织地毯",
+      "x": 282,
+      "y": 197,
+      "size": [
+        226,
+        52
+      ],
+      "layer": 0,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "工位前留出一条走动通道"
+    },
+    {
+      "id": "studio-books",
+      "asset": "bookcase",
+      "label": "技术书架",
+      "x": 53,
+      "y": 179,
+      "size": [
+        92,
+        119
+      ],
+      "layer": 20,
+      "interaction": "cycle",
+      "states": [
+        "算法集",
+        "设计集",
+        "随手翻读"
+      ]
+    },
+    {
+      "id": "studio-server",
+      "asset": "server",
+      "label": "服务器",
+      "x": 504,
+      "y": 179,
+      "size": [
+        66,
+        112
+      ],
+      "layer": 20,
+      "interaction": "toggle",
+      "states": [
+        "指示灯关闭",
+        "指示灯点亮"
+      ],
+      "default": 1,
+      "effect": "server"
+    },
+    {
+      "id": "studio-plant-left",
+      "asset": "plant",
+      "label": "窗边绿植",
+      "x": 120,
+      "y": 181,
+      "size": [
+        43,
+        69
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "叶片舒展",
+        "浇水中"
+      ],
+      "effect": "water",
+      "duration": 4
+    },
+    {
+      "id": "studio-plant-right",
+      "asset": "plant",
+      "label": "桌边绿植",
+      "x": 439,
+      "y": 181,
+      "size": [
+        43,
+        69
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "叶片舒展",
+        "浇水中"
+      ],
+      "effect": "water",
+      "duration": 4
+    },
+    {
+      "id": "desk-a",
+      "asset": "desk",
+      "label": "一号书桌",
+      "x": 210,
+      "y": 180,
+      "size": [
+        151,
+        72
+      ],
+      "layer": 20,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "电脑、座椅与书桌分别摆放"
+    },
+    {
+      "id": "desk-b",
+      "asset": "desk",
+      "label": "二号书桌",
+      "x": 366,
+      "y": 180,
+      "size": [
+        151,
+        72
+      ],
+      "layer": 20,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "独立书桌，可在房间配置里移动"
+    },
+    {
+      "id": "monitor-a",
+      "asset": "monitor",
+      "label": "一号电脑",
+      "x": 210,
+      "y": 119,
+      "size": [
+        72,
+        55
+      ],
+      "layer": 25,
+      "interaction": "cycle",
+      "states": [
+        "屏幕关闭",
+        "终端氛围",
+        "星空屏保"
+      ],
+      "default": 1,
+      "effect": "monitor"
+    },
+    {
+      "id": "monitor-b",
+      "asset": "monitor",
+      "label": "二号电脑",
+      "x": 366,
+      "y": 119,
+      "size": [
+        72,
+        55
+      ],
+      "layer": 25,
+      "interaction": "cycle",
+      "states": [
+        "屏幕关闭",
+        "终端氛围",
+        "星空屏保"
+      ],
+      "default": 2,
+      "effect": "monitor"
+    },
+    {
+      "id": "chair-a",
+      "asset": "chair",
+      "label": "一号座椅",
+      "x": 210,
+      "y": 188,
+      "size": [
+        46,
+        58
+      ],
+      "layer": 28,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "工作时也记得活动肩颈"
+    },
+    {
+      "id": "chair-b",
+      "asset": "chair",
+      "label": "二号座椅",
+      "x": 366,
+      "y": 188,
+      "size": [
+        46,
+        58
+      ],
+      "layer": 28,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "给下一个灵感留个座位"
+    }
+  ]
+}

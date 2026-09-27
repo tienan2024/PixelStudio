@@ -1,0 +1,155 @@
+{
+  "id": "bedroom",
+  "label": "卧室",
+  "width": 560,
+  "arrival": 274,
+  "background": "bedroom-shell.png",
+  "objects": [
+    {
+      "id": "bedroom-rug",
+      "asset": "rug",
+      "label": "床边地毯",
+      "x": 290,
+      "y": 199,
+      "size": [
+        228,
+        52
+      ],
+      "layer": 0,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "夜色与柔软的织物"
+    },
+    {
+      "id": "bedroom-wardrobe",
+      "asset": "wardrobe",
+      "label": "衣柜",
+      "x": 73,
+      "y": 181,
+      "size": [
+        79,
+        122
+      ],
+      "layer": 20,
+      "interaction": "toggle",
+      "states": [
+        "柜门合上",
+        "柜门打开"
+      ],
+      "effect": "wardrobe"
+    },
+    {
+      "id": "bedroom-plant",
+      "asset": "plant",
+      "label": "床边绿植",
+      "x": 147,
+      "y": 182,
+      "size": [
+        44,
+        69
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "叶片舒展",
+        "浇水中"
+      ],
+      "effect": "water",
+      "duration": 4
+    },
+    {
+      "id": "bedroom-bed",
+      "asset": "bed",
+      "label": "星夜小床",
+      "x": 302,
+      "y": 187,
+      "size": [
+        204,
+        138
+      ],
+      "layer": 20,
+      "interaction": "pulse",
+      "states": [
+        "被褥整理好了",
+        "晚安，做个好梦"
+      ],
+      "effect": "bed",
+      "duration": 7
+    },
+    {
+      "id": "bedroom-nightstand",
+      "asset": "nightstand",
+      "label": "床头柜",
+      "x": 194,
+      "y": 181,
+      "size": [
+        54,
+        57
+      ],
+      "layer": 20,
+      "interaction": "inspect",
+      "states": [
+        ""
+      ],
+      "description": "台灯可以单独开关"
+    },
+    {
+      "id": "bedroom-lamp",
+      "asset": "lamp",
+      "label": "床头灯",
+      "x": 194,
+      "y": 134,
+      "size": [
+        32,
+        43
+      ],
+      "layer": 25,
+      "interaction": "toggle",
+      "states": [
+        "灯光熄灭",
+        "暖光点亮"
+      ],
+      "default": 1,
+      "effect": "lamp"
+    },
+    {
+      "id": "bedroom-books",
+      "asset": "bookcase",
+      "label": "睡前书架",
+      "x": 483,
+      "y": 180,
+      "size": [
+        80,
+        112
+      ],
+      "layer": 20,
+      "interaction": "cycle",
+      "states": [
+        "睡前诗集",
+        "山间故事",
+        "星空图鉴"
+      ]
+    },
+    {
+      "id": "bedroom-cat",
+      "asset": "cat",
+      "label": "小睡猫",
+      "x": 365,
+      "y": 123,
+      "size": [
+        35,
+        27
+      ],
+      "layer": 30,
+      "interaction": "pulse",
+      "states": [
+        "安静打盹",
+        "轻轻伸懒腰"
+      ],
+      "duration": 4,
+      "effect": "cat"
+    }
+  ]
+}

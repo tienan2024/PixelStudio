@@ -1,237 +1,235 @@
-"""A fixed-pixel panorama with live agents and a scroll-shaped viewport."""
+"""Scroll viewport composing independent rooms, furniture and live member layers."""
 from __future__ import annotations
 
 from pathlib import Path
 import tkinter as tk
 
-from character_sprites import character_bank, draw_fallback, member_key
+from scene_actors import ActorLayer, LABELS
+from scene_assets import SceneAssets
+from scene_layout import load_rooms
+from scene_objects import SceneObject
+from scene_state import SceneState
 
 
 class PixelWorld(tk.Canvas):
+    # External window geometry stays fixed; the room catalog determines map width.
     WIDTH, HEIGHT = 1120, 224
-    INK = "#16232e"
-    COLORS = {"active": "#9bdbba", "idle": "#9bbad6", "systemError": "#eb9c80",
-              "notLoaded": "#b4becb", "unknown": "#b4becb"}
-    LABELS = {"active": "运行中", "idle": "待命", "systemError": "异常",
-              "notLoaded": "未加载 · 状态未知", "unknown": "状态未知"}
+
     def __init__(self, parent, *, bg, on_toggle=None, on_select=None):
-        super().__init__(parent, width=294, height=self.HEIGHT, bg=bg,
+        self.rooms, status_rooms = load_rooms()
+        self.map_width = sum(room.width for room in self.rooms)
+        super().__init__(parent, width=294, height=self.HEIGHT, bg=bg, takefocus=True,
                          highlightthickness=0, bd=0, cursor="hand2",
-                         scrollregion=(0, 0, self.WIDTH, self.HEIGHT))
+                         scrollregion=(0, 0, self.map_width, self.HEIGHT))
         self.on_toggle, self.on_select = on_toggle, on_select
-        self.actors, self.total, self.active = {}, 0, 0
-        self.selected, self.frame = None, 0
         self.view_width, self.expanded = 294, False
-        self.edge_colors = (bg, bg)
-        self.background = None
-        self.characters = character_bank(self)
+        self.edge_colors = bg, bg
+        self.room_id, self.camera = self.rooms[0].id, self.rooms[0].center
+        self.frame, self.hovered, self.selected_object = 0, None, None
+        self.tabs = []
+        self.images = SceneAssets(self)
+        specs = [obj for room in self.rooms for obj in room.objects]
+        state_path = Path(__file__).resolve().parents[1] / ".runtime/widget-world-state.json"
+        self.state = SceneState(state_path, specs)
+        self.objects = [SceneObject(self, room, spec, self.images, self.state)
+                        for room in self.rooms for spec in room.objects]
+        self.objects.sort(key=lambda obj: obj.spec.get("layer", 20))
+        self.by_id = {obj.id: obj for obj in self.objects}
+        self.members = ActorLayer(self, self.rooms, status_rooms)
         self._background()
+        for obj in self.objects:
+            obj.draw()
         self.bind("<Configure>", lambda _e: self._center_view())
         self.bind("<Button-1>", self._click)
-        self.bind("<Return>", lambda _e: self.on_toggle() if self.on_toggle else None)
-        self._overlay()
+        self.bind("<Motion>", self._motion)
+        self.bind("<Leave>", lambda _e: self._hover(None))
+        self.bind("<Return>", self._enter)
+        self.bind("<Left>", lambda _e: self._step_room(-1))
+        self.bind("<Right>", lambda _e: self._step_room(1))
+        self.bind("<MouseWheel>", self._wheel)
+        for i, room in enumerate(self.rooms, 1):
+            self.bind(str(i), lambda _e, key=room.id: self.select_room(key))
+        self._live()
 
-    def rect(self, x, y, w, h, color, tag="art"):
-        return self.create_rectangle(int(x), int(y), int(x+w), int(y+h),
+    def rect(self, x, y, width, height, color, tag="architecture"):
+        return self.create_rectangle(int(x), int(y), int(x+width), int(y+height),
                                      fill=color, outline="", tags=tag)
 
     def _background(self):
-        self.rect(0, 24, self.WIDTH, 176, "#243341")
-        path = Path(__file__).resolve().parent / "assets" / "pixel-world.png"
-        if path.is_file():
-            try:
-                source = tk.PhotoImage(master=self, file=str(path))
-                # Nearest-neighbour integer sampling keeps the asset's pixel grid.
-                factor = max(1, round(source.width() / self.WIDTH))
-                self.background = source.subsample(factor)
-                self.create_image(self.WIDTH//2, 112, image=self.background, tags="art")
-                return
-            except tk.TclError:
-                pass
-        # Offline fallback: remain usable while a custom panorama is unavailable.
-        self.rect(0, 150, self.WIDTH, 50, "#987049")
-        self.rect(0, 148, self.WIDTH, 4, "#463d37")
-        for y in (164, 182, 198):
-            self.rect(0, y, self.WIDTH, 2, "#715438")
-            for x in range((y % 3)*24, self.WIDTH, 72):
-                self.rect(x, y-14, 2, 14, "#7d5b3e")
-        for x in (30, 406, 750, 964):
-            self.rect(x-4, 42, 142, 76, self.INK)
-            self.rect(x, 46, 134, 68, "#263e59")
-            for k, h in enumerate((20, 36, 26, 40, 22, 30)):
-                self.rect(x+6+k*20, 110-h, 16, h, "#375571")
-                self.rect(x+10+k*20, 114-h, 4, 4, "#d4b878")
-            self.rect(x+64, 46, 4, 68, self.INK)
-            self.rect(x-6, 114, 146, 6, "#bf9d73")
-        for x in (206, 350, 710, 924):
-            self.rect(x, 24, 8, 128, "#344757")
-            self.rect(x, 24, 2, 126, "#82909a")
-        for x in (388, 476, 564, 652):
-            self.rect(x-36, 138, 76, 8, "#d1a476")
-            self.rect(x-32, 146, 6, 24, "#4d4034")
-            self.rect(x+28, 146, 6, 24, "#4d4034")
-            self.rect(x-28, 108, 46, 28, self.INK)
-            self.rect(x-24, 112, 38, 20, "#344c5f")
-            self.rect(x-10, 136, 14, 4, self.INK)
-            self.rect(x+24, 128, 8, 10, "#e9d6b0")
-            self.rect(x-20, 164, 36, 8, "#3d555a")
-        for x in (48, 92, 136, 186, 694, 1090):
-            self.rect(x-8, 138, 18, 18, "#b47650")
-            self.rect(x-10, 136, 22, 4, "#d59c69")
-            self.rect(x, 108, 2, 30, "#415e48")
-            for dx, dy, color in ((-12, 112, "#55906c"), (4, 104, "#78ad7b"),
-                                   (-6, 92, "#8fbd84"), (6, 124, "#6d9c6b")):
-                self.rect(x+dx, dy, 12, 8, color)
-        self.rect(232, 76, 48, 74, self.INK)
-        for y in range(82, 144, 14):
-            self.rect(238, y, 36, 10, "#405567")
-            self.rect(262, y+4, 4, 2, "#96d3b2")
-        self.rect(294, 76, 40, 44, "#c5b790")
-        for x, y in ((300, 82), (314, 86), (304, 102)):
-            self.rect(x, y, 12, 10, "#e7c985")
-        self.rect(754, 128, 124, 24, "#427462")
-        self.rect(748, 148, 136, 16, "#60957a")
-        self.rect(756, 164, 6, 8, "#3e3b34")
-        self.rect(870, 164, 6, 8, "#3e3b34")
-        self.rect(772, 172, 66, 8, "#c79c6b")
-        self.rect(944, 126, 70, 38, "#76604a")
-        self.rect(950, 92, 58, 34, "#336d7a")
-        self.rect(950, 94, 58, 2, "#8dc4bf")
-        self.rect(1028, 98, 44, 66, "#293d54")
-        self.rect(1034, 106, 32, 30, "#6d867c")
-        self.rect(1036, 142, 28, 6, "#d5bb84")
+        for i, room in enumerate(self.rooms, 1):
+            self.rect(room.x, 24, room.width, 176, "#293542")
+            self.rect(room.x, 153, room.width, 47, "#72513b")
+            image = self.images.background(room.background, room.width, 176)
+            if image:
+                self.create_image(room.center, 24, image=image, anchor="n", tags="architecture")
+            else:
+                for y in range(157, 201, 10):
+                    self.rect(room.x, y, room.width, 1, "#977453")
+            for x in (room.x, room.x+room.width-8):
+                self.rect(x, 24, 8, 176, "#382d29")
+                self.rect(x+2, 24, 2, 176, "#947149")
+            self.rect(room.x+20, 32, 88, 18, "#202d35")
+            self.create_text(room.x+28, 41, anchor="w", text=f"0{i}  {room.label}",
+                             fill="#d3bd94", font=("Microsoft YaHei UI", 8), tags="architecture")
 
     def set_agents(self, threads):
-        self.characters.register(threads)
-        ordered = sorted(threads, key=lambda t: ((t.get("status") or {}).get("type") != "active",
-                                                str(t.get("id") or t.get("name") or "")))
-        self.total = len(threads)
-        self.active = sum((t.get("status") or {}).get("type") == "active" for t in threads)
-        actors, zone_counts, occupied = {}, {}, []
-        for thread in ordered[:12]:
-            key = member_key(thread)
-            state = (thread.get("status") or {}).get("type", "unknown")
-            state = state if state in self.COLORS else "unknown"
-            n = zone_counts.get(state, 0)
-            zone_counts[state] = n+1
-            starts = {"active": 400, "idle": 852, "systemError": 240,
-                      "notLoaded": 470, "unknown": 586}
-            preferred = starts[state] + (n % 4) * (100 if state == "active" else 56)
-            candidates = ([preferred] if n < 4 else []) + sorted(
-                range(56, 1080, 48), key=lambda x: abs(x-preferred))
-            candidates += sorted(range(32, 1081, 2), key=lambda x: abs(x-preferred))
-            tx = next(x for x in candidates if x <= 1080 and all(abs(x-other) >= 38 for other in occupied))
-            occupied.append(tx)
-            ty = 189
-            actor = self.actors.get(key, {"x": tx, "y": ty})
-            actor.update(tx=tx, ty=ty, state=state,
-                         name=" ".join(str(thread.get("agentNickname") or thread.get("name") or "AI 成员").split()),
-                         role=str(thread.get("agentRole") or "子代理"))
-            actors[key] = actor
-        self.actors = actors
-        if self.selected not in actors:
-            self.selected = None
+        self.members.set_agents(threads)
         self._live()
 
     def advance(self):
         self.frame += 1
-        for a in self.actors.values():
-            a["moving"] = a["x"] != a["tx"] or a["y"] != a["ty"]
-            for axis in ("x", "y"):
-                delta = a["t"+axis]-a[axis]
-                a[axis] += max(-2, min(2, delta))
+        self.state.tick()
+        self.members.advance()
         self._live()
 
     def _live(self):
-        self.delete("live")
-        if self.background is not None:
-            # Animated overlays are independent of the generated background.
-            for n, cx in enumerate((403, 503, 603, 704)):
-                if n < self.active:
-                    for row in range(3):
-                        self.rect(cx-16, 94+row*5, 14+(self.frame+row)%5*2, 2,
-                                  ("#8cc9ad", "#c9b97b", "#8babbc")[row], "live")
-            for n in range(3):
-                rise = (self.frame+n*4)%12
-                self.rect(932+(n%2)*2, 151-rise, 2, 2, "#b6b8a1", "live")
-            if self.frame%5 < 2:
-                for x, y in ((445, 51), (622, 66), (818, 53)):
-                    self.rect(x, y, 2, 2, "#d9be81", "live")
-        for key, a in sorted(self.actors.items(), key=lambda item: item[1]["y"]):
-            x, y = a["x"], a["y"]  # Position is the feet, not the sprite's top-left.
-            self.rect(x-11, y-1, 22, 3, "#544738", "live")
-            frame, dx, dy = self.characters.sample(key, a["state"], moving=a.get("moving", False))
-            if frame is not None:
-                self.create_image(x+dx, y+dy, image=frame, anchor="s", tags="live")
-                width, height = frame.width(), frame.height()
-            else:
-                draw_fallback(self, x+dx, y+dy, self.characters.assignments.get(key, 0), "live")
-                width, height = 20, 40
-            a["bounds"] = (x-width//2-5, y-height-8, x+width//2+5, y+4)
-            badge = "?" if a["state"] in {"unknown", "notLoaded"} else "!" if a["state"] == "systemError" else ""
-            if badge:
-                self.create_text(x+width//2+4, y-height-1, text=badge, fill=self.COLORS[a["state"]],
-                                 font=("Consolas", 10, "bold"), tags="live")
-            if key == self.selected:
-                self.rect(x-9, y+3, 18, 2, "#f3ca7d", "live")
+        for obj in self.objects:
+            obj.animate(self.frame)
+            obj.raise_layers()
+        self.members.draw()
+        self._highlight()
         self._overlay()
 
     def set_viewport(self, width, *, expanded, left_bg, right_bg):
-        self.view_width = width
-        self.expanded = expanded
+        self.view_width, self.expanded = width, expanded
         self.edge_colors = left_bg, right_bg
         self.configure(width=width)
         self._center_view()
 
     def _center_view(self):
-        self.xview_moveto(max(0, (self.WIDTH-self.view_width)/2) / self.WIDTH)
+        left = max(0, min(self.camera-self.view_width/2, self.map_width-self.view_width))
+        self.xview_moveto(left/self.map_width)
         self._overlay()
+
+    def select_room(self, key):
+        room = next((room for room in self.rooms if room.id == key), None)
+        if room:
+            self.room_id, self.camera = key, room.center
+            self.hovered = self.selected_object = None
+            self.members.selected = None
+            self._center_view()
+            self._live()
+        return "break"
+
+    def _step_room(self, delta):
+        index = next(i for i, room in enumerate(self.rooms) if room.id == self.room_id)
+        return self.select_room(self.rooms[(index+delta)%len(self.rooms)].id)
+
+    def _wheel(self, event):
+        if self.expanded and event.delta:
+            left = self.canvasx(0) + (-96 if event.delta > 0 else 96)
+            left = max(0, min(left, self.map_width-self.view_width))
+            self.camera = left+self.view_width/2
+            self.room_id = min(self.rooms, key=lambda room: abs(room.center-self.camera)).id
+            self._hover(None)
+            self._center_view()
+        return "break"
+
+    def _enter(self, _event):
+        if self.expanded and self.selected_object:
+            self.state.activate(self.selected_object)
+            self._live()
+        elif self.on_toggle:
+            self.on_toggle()
+        return "break"
 
     def _overlay(self):
         self.delete("overlay")
-        left, w = int(self.canvasx(0)), self.view_width
-        self.rect(left, 0, w, 24, "#1c2b36", "overlay")
-        self.rect(left, 200, w, 24, "#1c2b36", "overlay")
-        self.rect(left+10, 23, w-20, 1, "#3d505c", "overlay")
-        title = "PIXEL STUDIO" if w < 420 else "PIXEL STUDIO  /  一间会呼吸的工作室"
-        self.create_text(left+20, 12, text=title, anchor="w", fill="#e2c58b",
-                         font=("Microsoft YaHei UI", 8, "bold"), tags="overlay")
-        count = f"{self.active} 运行 · {self.total} 成员"
-        if self.total > len(self.actors):
-            count += f" · 展示 {len(self.actors)}"
-        if w >= 420:
-            self.create_text(left+w-22, 12, text=count, anchor="e", fill="#a5c8bc",
+        self.tabs = []
+        left, width = int(self.canvasx(0)), self.view_width
+        self.rect(left, 0, width, 24, "#1c2b36", "overlay")
+        self.rect(left, 200, width, 24, "#1c2b36", "overlay")
+        self.rect(left+10, 23, width-20, 1, "#3d505c", "overlay")
+        start = 154 if width >= 600 else 20
+        if width >= 600:
+            self.create_text(left+20, 12, text="PIXEL STUDIO", anchor="w", fill="#e2c58b",
+                             font=("Consolas", 9, "bold"), tags="overlay")
+        for i, room in enumerate(self.rooms):
+            x = left+start+i*66
+            active = room.id == self.room_id
+            if active:
+                self.rect(x-6, 3, 60, 18, "#3b4b4d", "overlay")
+            self.create_text(x+24, 12, text=room.label, fill="#edd3a3" if active else "#8eaaa9",
                              font=("Microsoft YaHei UI", 8), tags="overlay")
-        a = self.actors.get(self.selected)
-        info = (f"{a['name'][:20]} · {a['role'][:18]} · {self.LABELS[a['state']]}" if a else
-                "点击成员查看身份  ·  点击卷轴收起" if self.expanded else f"{count}  ·  点击展开画卷")
-        if w < 420 and a:
-            info = f"{a['name'][:12]} · {self.LABELS[a['state']]}"
-        self.create_text(left+w/2, 212, text=info, fill="#aebdc5",
+            self.tabs.append((x-6, x+54, room.id))
+        if width >= 700:
+            count = f"{self.members.active} 运行 · {self.members.total} 成员"
+            if self.members.total > len(self.members.actors):
+                count += f" · 展示 {len(self.members.actors)}"
+            self.create_text(left+width-22, 12, text=count, anchor="e", fill="#a5c8bc",
+                             font=("Microsoft YaHei UI", 8), tags="overlay")
+        target = self.hovered or self.selected_object
+        actor = self.members.actors.get(self.members.selected)
+        if target:
+            info = self.state.describe(target)
+            if self.hovered:
+                info += "  ·  点击互动"
+        elif actor:
+            info = f"{actor['name']} · {actor['role']} · {LABELS[actor['state']]}"
+        else:
+            info = ("点击家具互动  ·  滚轮平移 / 1–3 切换房间  ·  两侧卷轴收起" if self.expanded else
+                    f"{self.members.total} 位成员 · 点击展开画卷")
+        limit = max(12, (width-38)//11)
+        info = info if len(info) <= limit else info[:limit-1]+"…"
+        self.create_text(left+width/2, 212, text=info, fill="#bfc8c7",
                          font=("Microsoft YaHei UI", 8), tags="overlay")
-        for x in (left+2, left+w-12):
+        for x in (left+2, left+width-12):
             self.rect(x, 12, 10, 200, "#382f2c", "overlay")
             self.rect(x+2, 8, 6, 208, "#a88659", "overlay")
             self.rect(x+2, 14, 2, 196, "#e3c18a", "overlay")
             self.rect(x-2, 8, 14, 4, "#d4b078", "overlay")
             self.rect(x-2, 212, 14, 4, "#d4b078", "overlay")
-        # Stepped corner masks retain the pixel vocabulary and desktop transparency.
         for y, cut in ((0, 8), (2, 4), (4, 2)):
             for yy in (y, self.HEIGHT-y-2):
                 self.rect(left, yy, cut, 2, self.edge_colors[0], "overlay")
-                self.rect(left+w-cut, yy, cut, 2, self.edge_colors[1], "overlay")
+                self.rect(left+width-cut, yy, cut, 2, self.edge_colors[1], "overlay")
+
+    def _object_at(self, x, y):
+        if self.members.hit(x, y):
+            return None
+        return next((obj.id for obj in reversed(self.objects) if obj.hit(x, y)), None)
+
+    def _motion(self, event):
+        if not self.expanded or not (16 < event.x < self.view_width-16 and 24 < event.y < 200):
+            self._hover(None)
+            return
+        self._hover(self._object_at(self.canvasx(event.x), event.y))
+
+    def _hover(self, key):
+        if key != self.hovered:
+            self.hovered = key
+            self._highlight()
+            self._overlay()
+
+    def _highlight(self):
+        self.delete("hover")
+        key = self.hovered or self.selected_object
+        if key in self.by_id:
+            self.by_id[key].highlight()
 
     def _click(self, event):
+        self.focus_set()
         if not self.expanded or event.x <= 16 or event.x >= self.view_width-16:
             if self.on_toggle:
                 self.on_toggle()
             return
         x, y = self.canvasx(event.x), event.y
-        for key, a in reversed(sorted(self.actors.items(), key=lambda item: item[1]["y"])):
-            x1, y1, x2, y2 = a.get("bounds", (a["x"]-18, a["y"]-64, a["x"]+18, a["y"]+4))
-            if x1 <= x <= x2 and y1 <= y <= y2:
-                self.selected = key
-                self._overlay()
-                if self.on_select:
-                    self.on_select(a)
-                return
+        if y <= 24:
+            for x1, x2, room_id in self.tabs:
+                if x1 <= x <= x2:
+                    self.select_room(room_id)
+                    return
+        if not 24 < y < 200:
+            return
+        member = self.members.hit(x, y)
+        if member:
+            self.members.selected, self.selected_object, self.hovered = member, None, None
+            if self.on_select:
+                self.on_select(self.members.actors[member])
+        else:
+            key = self._object_at(x, y)
+            self.selected_object = key
+            self.members.selected = None
+            if key:
+                self.state.activate(key)
+        self._live()
