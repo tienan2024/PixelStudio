@@ -289,6 +289,12 @@ AGENT_ARMS_UP = AGENT_OPEN[:4] + ("KKCCCCCCCCKK",) + AGENT_OPEN[5:]
 
 AGENT_CLOSED = AGENT_OPEN[:3] + (".KCKKKKKKCK.",) + AGENT_OPEN[4:]
 
+# 专注（干活时 -_- 眼 + 举手打字）
+AGENT_FOCUS = AGENT_OPEN[:3] + (".KCKKKKKKCK.", "KKCCCCCCCCKK") + AGENT_OPEN[5:]
+
+# 报错（X_X 晕眩眼：两行拼出 X 形）
+AGENT_ERROR = AGENT_OPEN[:3] + (".KCKWKKWKCK.", ".KCWKKKWKCK.") + AGENT_OPEN[5:]
+
 DOC = (
     "............",
     "..KKKKKKKK..",
@@ -316,14 +322,14 @@ def doc_frames(lines: int) -> tuple:
 
 def agent_frames(state: str) -> list:
     """子代理状态 → 帧序列 (grid, dx, dy, 头顶文字)。"""
-    if state == "active":  # 干活中：举手打字 + 身体起伏
-        return [(AGENT_ARMS_UP, 0, 0, ""), (AGENT_OPEN, 0, 1, "")]
+    if state == "active":  # 干活中：专注眼举手打字 + 身体起伏
+        return [(AGENT_FOCUS, 0, 0, ""), (AGENT_OPEN, 0, 1, "")]
     if state == "notLoaded":  # 休息中：闭眼 + Zzz 飘出
         return [(AGENT_CLOSED, 0, 0, ""), (AGENT_CLOSED, 0, 0, "z"),
                 (AGENT_CLOSED, 0, 0, "z Z"), (AGENT_CLOSED, 0, 0, "z Z z")]
-    if state == "systemError":  # 异常：左右摇晃 + 感叹号闪烁
-        return [(AGENT_OPEN, -1, 0, "!"), (AGENT_OPEN, 1, 0, ""),
-                (AGENT_OPEN, -1, 0, "!"), (AGENT_OPEN, 1, 0, "")]
+    if state == "systemError":  # 异常：X_X 晕眩眼左右摇晃 + 感叹号闪烁
+        return [(AGENT_ERROR, -1, 0, "!"), (AGENT_ERROR, 1, 0, ""),
+                (AGENT_ERROR, -1, 0, "!"), (AGENT_ERROR, 1, 0, "")]
     # 待命：约 1.7 秒眨一次眼
     return [(AGENT_OPEN, 0, 0, "")] * 6 + [(AGENT_CLOSED, 0, 0, "")]
 
@@ -603,10 +609,10 @@ class Office(tk.Canvas):
             state = a["state"]
             if a.get("moving"):  # 走路：摆臂 + 上下颠
                 grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), -(i % 2), ""
-            elif state == "active":  # 在工位打字
-                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), i % 2, ""
-            elif state == "systemError":  # 面壁 + 感叹号
-                grid, dy, overlay = AGENT_OPEN, 0, ("!" if i % 2 else "")
+            elif state == "active":  # 在工位专注打字（-_- 眼）
+                grid, dy, overlay = (AGENT_FOCUS if i % 2 else AGENT_OPEN), i % 2, ""
+            elif state == "systemError":  # 面壁 + X_X 晕眩眼 + 感叹号
+                grid, dy, overlay = AGENT_ERROR, 0, ("!" if i % 2 else "")
             elif state == "notLoaded":  # 在沙发上睡觉
                 grid, dy = AGENT_CLOSED, 0
                 overlay = ("", "z", "z Z", "z Z z")[i % 4]
