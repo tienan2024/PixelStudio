@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import random
 import tkinter as tk
+import zlib
 
 from character_sprites import character_bank, draw_fallback, member_key
 
@@ -14,6 +16,20 @@ class PixelWorld(tk.Canvas):
               "notLoaded": "#b4becb", "unknown": "#b4becb"}
     LABELS = {"active": "运行中", "idle": "待命", "systemError": "异常",
               "notLoaded": "未加载 · 状态未知", "unknown": "状态未知"}
+
+    # 功能分区（世界坐标 x，详见 docs/idle-events.md）
+    ZONES = {"fireplace": (20, 70), "garden": (130, 255), "server": (246, 300),
+             "window": (315, 375), "desk": (390, 700), "bookshelf": (620, 700),
+             "couch": (730, 860), "aquarium": (860, 955), "arcade": (960, 1045)}
+    DESK_SEATS = (410, 505, 600, 680)
+    LANES = (180, 189, 198)   # 三条走道车道，按成员 key 固定（间距 >6px 才互不挡路）
+    SPEED = 3                 # 水平速度（px/拍，一拍 280ms）
+    # 待机事件池：(目标, 权重)；stroll=走廊踱步，visit=串门寒暄
+    EVENTS = (("couch", 3), ("aquarium", 2), ("arcade", 1.5), ("bookshelf", 2),
+              ("window", 2), ("garden", 1.5), ("fireplace", 1.5), ("server", 0.5),
+              ("stroll", 2), ("visit", 1))
+    ACTIVE_EVENTS = (("window", 2), ("stroll", 2), ("visit", 1))  # active 忙里偷闲
+
     def __init__(self, parent, *, bg, on_toggle=None, on_select=None):
         super().__init__(parent, width=294, height=self.HEIGHT, bg=bg,
                          highlightthickness=0, bd=0, cursor="hand2",
@@ -24,6 +40,7 @@ class PixelWorld(tk.Canvas):
         self.view_width, self.expanded = 294, False
         self.edge_colors = (bg, bg)
         self.background = None
+        self.rng = random.Random()
         self.characters = character_bank(self)
         self._background()
         self.bind("<Configure>", lambda _e: self._center_view())
@@ -101,30 +118,39 @@ class PixelWorld(tk.Canvas):
         self.rect(1034, 106, 32, 30, "#6d867c")
         self.rect(1036, 142, 28, 6, "#d5bb84")
 
+    def _home_x(self, state, n):
+        """状态决定家：active 回工位，报错去机柜面壁，其余在休息区。"""
+        if state == "active":
+            return self.DESK_SEATS[n % 4] + (n // 4) * 26
+        if state == "systemError":
+            return 250 + (n % 3) * 24
+        if state == "idle":
+            return 745 + (n % 4) * 30
+        if state == "notLoaded":
+            return 865 + (n % 3) * 26
+        return 320 + (n % 3) * 22
+
     def set_agents(self, threads):
         self.characters.register(threads)
         ordered = sorted(threads, key=lambda t: ((t.get("status") or {}).get("type") != "active",
                                                 str(t.get("id") or t.get("name") or "")))
         self.total = len(threads)
         self.active = sum((t.get("status") or {}).get("type") == "active" for t in threads)
-        actors, zone_counts, occupied = {}, {}, []
+        actors, counts = {}, {}
         for thread in ordered[:12]:
             key = member_key(thread)
             state = (thread.get("status") or {}).get("type", "unknown")
             state = state if state in self.COLORS else "unknown"
-            n = zone_counts.get(state, 0)
-            zone_counts[state] = n+1
-            starts = {"active": 400, "idle": 852, "systemError": 240,
-                      "notLoaded": 470, "unknown": 586}
-            preferred = starts[state] + (n % 4) * (100 if state == "active" else 56)
-            candidates = ([preferred] if n < 4 else []) + sorted(
-                range(56, 1080, 48), key=lambda x: abs(x-preferred))
-            candidates += sorted(range(32, 1081, 2), key=lambda x: abs(x-preferred))
-            tx = next(x for x in candidates if x <= 1080 and all(abs(x-other) >= 38 for other in occupied))
-            occupied.append(tx)
-            ty = 189
-            actor = self.actors.get(key, {"x": tx, "y": ty})
-            actor.update(tx=tx, ty=ty, state=state,
+            n = counts.get(state, 0)
+            counts[state] = n + 1
+            home = self._home_x(state, n)
+            actor = self.actors.get(key)
+            if actor is None:  # 新成员：固定车道、思考冷却随机打散
+                actor = {"x": home, "y": 189,
+                         "lane": self.LANES[zlib.crc32(key.encode("utf-8")) % 3],
+                         "event": None,
+                         "next_think": self.frame + self.rng.randint(20, 120)}
+            actor.update(home=home, state=state,
                          name=" ".join(str(thread.get("agentNickname") or thread.get("name") or "AI 成员").split()),
                          role=str(thread.get("agentRole") or "子代理"))
             actors[key] = actor
@@ -133,13 +159,123 @@ class PixelWorld(tk.Canvas):
             self.selected = None
         self._live()
 
+    # -- 待机随机事件（docs/idle-events.md） -------------------------------
+
+    def _pick_event(self, key, a):
+        """按状态权重抽一个事件，返回 {'x': 目标, 'dwell': 停留拍数} 或 None。"""
+        state = a["state"]
+        if state == "active":  # 干活是主行为，小概率短暂离席
+            if self.rng.random() > 0.15:
+                a["next_think"] = self.frame + self.rng.randint(60, 160)
+                return None
+            table = self.ACTIVE_EVENTS
+        elif state == "systemError":  # 面壁为主，偶发短距踱步
+            if self.rng.random() > 0.08:
+                a["next_think"] = self.frame + self.rng.randint(80, 200)
+                return None
+            return {"x": self.rng.randint(220, 320), "dwell": self.rng.randint(6, 12)}
+        else:
+            table = self.EVENTS
+        total = sum(w for _, w in table)
+        roll = self.rng.uniform(0, total)
+        for zone, w in table:
+            roll -= w
+            if roll <= 0:
+                break
+        if zone == "stroll":
+            x, dwell = self.rng.randint(60, 1060), self.rng.randint(6, 12)
+        elif zone == "visit":
+            others = [o for k, o in self.actors.items() if k != key]
+            if not others:
+                x, dwell = self.rng.randint(60, 1060), self.rng.randint(6, 12)
+            else:
+                host = self.rng.choice(others)
+                x = max(40, min(1080, int(host["x"]) + self.rng.choice((-1, 1)) * 20))
+                dwell = self.rng.randint(10, 20)
+        else:
+            x1, x2 = self.ZONES[zone]
+            x, dwell = self.rng.randint(x1, x2), self.rng.randint(15, 50)
+        if state == "active":
+            dwell = max(6, dwell // 2)  # 忙里偷闲，停留减半
+        # 目标避占：与其他成员的目标/站位保持 ≥30px（串门除外）
+        if zone != "visit":
+            taken = [int(o["event"]["x"]) if o.get("event") else int(o["x"])
+                     for k, o in self.actors.items() if k != key]
+            for _ in range(6):
+                if all(abs(x - t) >= 30 for t in taken):
+                    break
+                x += self.rng.choice((-1, 1)) * self.rng.randint(12, 36)
+                x = max(40, min(1080, x))
+        return {"x": x, "dwell": dwell}
+
+    def _think(self, key, a):
+        if a["event"] is None and not a.get("moving") and self.frame >= a["next_think"]:
+            a["event"] = self._pick_event(key, a)
+
+    def _blocked(self, a, direction):
+        """同车道（|Δy|<6）行进方向 28px 内有成员则视为被挡。"""
+        return any(o is not a and abs(o["y"] - a["y"]) < 6
+                   and 0 < (o["x"] - a["x"]) * direction <= 28
+                   for o in self.actors.values())
+
+    def _drift_lane(self, a):
+        dy = a["lane"] - a["y"]
+        if dy:
+            a["y"] += max(-1, min(1, dy))
+
+    def _pass_lane(self, a):
+        """借道：换到另一条没人挡道的车道绕过去（兽群式避让）。"""
+        for ny in self.LANES:
+            if ny == a["lane"]:
+                continue
+            if not any(o is not a and abs(o["y"] - ny) < 4 and abs(o["x"] - a["x"]) < 24
+                       for o in self.actors.values()):
+                dy = ny - a["y"]
+                if dy:
+                    a["y"] += max(-1, min(1, dy))
+                    return True
+        return False
+
+    def _step(self, key, a):
+        """走位：车道固定 + 分离避让 + 借道超车 + 堵死超时放弃。"""
+        ev = a["event"]
+        if ev and "until" in ev:  # 到位停留中
+            a["moving"] = False
+            self._drift_lane(a)
+            if self.frame >= ev["until"]:
+                a["event"] = None
+                a["next_think"] = self.frame + self.rng.randint(40, 140)
+            return
+        tx = ev["x"] if ev else a["home"]
+        dx = tx - a["x"]
+        moved = False
+        if dx:
+            step = max(-self.SPEED, min(self.SPEED, dx))
+            direction = 1 if step > 0 else -1
+            if self._blocked(a, direction):
+                a["blocked_for"] = a.get("blocked_for", 0) + 1
+                moved = self._pass_lane(a)
+                if a["blocked_for"] > 40:  # 实在过不去，放弃这次事件回家
+                    a["event"] = None
+                    a["blocked_for"] = 0
+                    a["next_think"] = self.frame + self.rng.randint(40, 120)
+            else:
+                a["blocked_for"] = 0
+                a["x"] += step
+                moved = True
+                self._drift_lane(a)
+        else:
+            self._drift_lane(a)
+        a["moving"] = moved
+        if ev and a["x"] == tx:  # 到达事件点，开始停留
+            ev["until"] = self.frame + ev["dwell"]
+            a["blocked_for"] = 0
+
     def advance(self):
         self.frame += 1
-        for a in self.actors.values():
-            a["moving"] = a["x"] != a["tx"] or a["y"] != a["ty"]
-            for axis in ("x", "y"):
-                delta = a["t"+axis]-a[axis]
-                a[axis] += max(-2, min(2, delta))
+        for key, a in self.actors.items():
+            self._think(key, a)
+            self._step(key, a)
         self._live()
 
     def _live(self):
