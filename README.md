@@ -42,7 +42,7 @@ powershell -ExecutionPolicy Bypass -File install_shortcut.ps1
 
 ## 素材署名
 
-办公室场景中的职员、电脑、饮水机像素动画来自 OpenGameArt 的
+办公室场景中的电脑、饮水机像素动画来自 OpenGameArt 的
 [Office worker sprites](https://opengameart.org/content/office-worker-sprites)，
 作者 **emcee-flesher**，许可证 **CC-BY 4.0**。详见 [assets/ATTRIBUTION.md](assets/ATTRIBUTION.md)。
-素材缺失时组件会自动退回手绘图形，不影响使用。
+房间家具与角色均为程序手绘，素材缺失时电脑与饮水机会退回手绘图形，不影响使用。

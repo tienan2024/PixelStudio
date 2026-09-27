@@ -457,11 +457,11 @@ class Office(tk.Canvas):
     FLOOR = "#a06830"
     INK = "#1c1c1c"      # 描边色
     FLOOR_Y = 100
-    WORK_SPOTS = ((72, 68), (104, 68), (136, 68))
-    COUCH_SPOTS = ((214, 62), (246, 62))
-    COFFEE_SPOT = (148, 68)
-    BUG_SPOTS = ((34, 68), (44, 80))
-    SPAWN = (8, 68)
+    WORK_SPOTS = ((72, 78), (104, 78), (136, 78))
+    COUCH_SPOTS = ((214, 72), (246, 72))
+    COFFEE_SPOT = (148, 78)
+    BUG_SPOTS = ((34, 78), (44, 88))
+    SPAWN = (8, 78)
     COMPUTERS = ((80, 40), (116, 40))
     COOLER_POS = (178, 68)
 
@@ -599,33 +599,25 @@ class Office(tk.Canvas):
             self.create_image(self.COOLER_POS[0], self.COOLER_POS[1], image=img,
                               anchor="nw", tags="screen")
         for key, a in sorted(self.actors.items()):
+            i = a["frame_i"]
             state = a["state"]
-            overlay = ""
-            dx = 0
-            v = "w1" if sum(map(ord, key)) % 2 == 0 else "w2"  # 按 key 稳定分配皮肤
-            if a.get("moving"):  # 走过去：按方向选左/右行走
-                img = sprite(f"{v}_walk_r" if a["tx"] >= a["x"] else f"{v}_walk_l", i)
+            if a.get("moving"):  # 走路：摆臂 + 上下颠
+                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), -(i % 2), ""
             elif state == "active":  # 在工位打字
-                img = sprite(f"{v}_type", i)
+                grid, dy, overlay = (AGENT_ARMS_UP if i % 2 else AGENT_OPEN), i % 2, ""
             elif state == "systemError":  # 面壁 + 感叹号
-                img = sprite(f"{v}_idle", 0)
-                overlay = "!" if i % 2 else ""
-                dx = (i % 2) * 2 - 1
-            elif state == "notLoaded":  # 睡觉
-                img = sprite(f"{v}_idle", 0)
+                grid, dy, overlay = AGENT_OPEN, 0, ("!" if i % 2 else "")
+            elif state == "notLoaded":  # 在沙发上睡觉
+                grid, dy = AGENT_CLOSED, 0
                 overlay = ("", "z", "z Z", "z Z z")[i % 4]
-            elif a.get("zone") == "lounge":  # 饮水机旁喝水
-                img = sprite(f"{v}_drink", i)
-            else:  # 站着休息（慢放呼吸）
-                img = sprite(f"{v}_idle", i // 2)
-            if img is not None:
-                self.create_image(a["x"] + dx, a["y"], image=img, anchor="nw", tags="actor")
-            else:  # 素材缺失时退回手绘史莱姆
-                draw_grid(self, AGENT_OPEN, {"K": "#0d0f12", "C": a["color"], "W": "#16191e"},
-                          a["x"] + dx, a["y"], 2, "actor")
+            else:  # 休息眨眼
+                grid, dy, overlay = (AGENT_CLOSED if i % 8 == 7 else AGENT_OPEN), 0, ""
+            dx = (i % 2) * 2 - 1 if state == "systemError" and not a.get("moving") else 0
+            draw_grid(self, grid, {"K": self.INK, "C": a["color"], "W": "#f8f8f8"},
+                      a["x"] + dx, a["y"] + dy, 2, "actor")
             if overlay:
-                self.create_text(a["x"] + 30, a["y"] - 8, text=overlay, anchor="e",
-                                 fill="#efad83" if state == "systemError" else "#9199a5",
+                self.create_text(a["x"] + 24, a["y"] - 8, text=overlay, anchor="e",
+                                 fill="#fc5454" if state == "systemError" else "#f8f8f8",
                                  font=("Microsoft YaHei UI", 7, "bold"), tags="actor")
 
     def _draw_ambient(self):
