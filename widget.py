@@ -448,10 +448,14 @@ class RoundedCard(tk.Canvas):
 
 
 class Office(tk.Canvas):
-    """迷你像素办公室：子代理按状态走到工位、沙发或 Bug 区。"""
+    """迷你像素办公室：子代理按状态走到工位、沙发或 Bug 区。
 
-    WALL = "#1b1f26"
-    FLOOR = "#262c36"
+    房间家具与职员素材统一为 NES 卡通风：鲜亮平涂 + 黑色描边。
+    """
+
+    WALL = "#7c8fc0"
+    FLOOR = "#a06830"
+    INK = "#1c1c1c"      # 描边色
     FLOOR_Y = 100
     WORK_SPOTS = ((72, 68), (104, 68), (136, 68))
     COUCH_SPOTS = ((214, 62), (246, 62))
@@ -467,6 +471,11 @@ class Office(tk.Canvas):
         self.frame = 0
         self._draw_room()
 
+    def _obox(self, x1, y1, x2, y2, fill, tag="bg", w=1):
+        """带黑色描边的实心方块（NES 卡通家具的基本件）。"""
+        self.create_rectangle(x1 - w, y1 - w, x2 + w, y2 + w, fill=self.INK, outline="", tags=tag)
+        self.create_rectangle(x1, y1, x2, y2, fill=fill, outline="", tags=tag)
+
     def _draw_room(self):
         W, H, r = 296, 124, 10
         wall = self.WALL
@@ -476,53 +485,56 @@ class Office(tk.Canvas):
                             fill=wall, outline="", tags="bg")
         self.create_rectangle(r, 0, W - r, H, fill=wall, outline="", tags="bg")
         self.create_rectangle(0, r, W, H - r, fill=wall, outline="", tags="bg")
-        # 木地板（拼板缝）
-        self.create_rectangle(6, self.FLOOR_Y, W - 6, H - 6, fill=self.FLOOR, outline="", tags="bg")
-        self.create_rectangle(6, self.FLOOR_Y, W - 6, self.FLOOR_Y + 2, fill="#2e3540", outline="", tags="bg")
-        for x in range(22, W - 6, 16):
-            self.create_line(x, self.FLOOR_Y + 2, x, H - 6, fill="#222833", tags="bg")
-        self.create_line(6, (self.FLOOR_Y + H - 6) // 2, W - 6, (self.FLOOR_Y + H - 6) // 2,
-                         fill="#222833", tags="bg")
-        # 吊灯
+        # 木地板（拼板缝 + 踢脚线）
+        self.create_rectangle(4, self.FLOOR_Y, W - 4, H - 4, fill=self.FLOOR, outline="", tags="bg")
+        self.create_rectangle(4, self.FLOOR_Y, W - 4, self.FLOOR_Y + 2, fill=self.INK, outline="", tags="bg")
+        for x in range(20, W - 4, 16):
+            self.create_line(x, self.FLOOR_Y + 2, x, H - 4, fill="#7a4f28", tags="bg")
+        self.create_line(4, (self.FLOOR_Y + H - 4) // 2, W - 4, (self.FLOOR_Y + H - 4) // 2,
+                         fill="#7a4f28", tags="bg")
+        # 吊灯（黄色灯罩）
         for cx in (110, 240):
-            self.create_line(cx, 0, cx, 6, fill="#3a4150", tags="bg")
-            self.create_rectangle(cx - 6, 6, cx + 6, 12, fill="#3a4150", outline="", tags="bg")
-            self.create_rectangle(cx - 3, 12, cx + 3, 14, fill="#5a6270", outline="", tags="bg")
-        # 窗户（天空每帧按真实时间重绘）
-        self.create_rectangle(70, 12, 104, 40, fill="#0d0f12", outline="#3a4150", tags="bg")
-        # 挂钟（指针每帧按真实时间重绘）
-        self.create_rectangle(162, 14, 176, 28, fill="#0d0f12", outline="#3a4150", tags="bg")
-        # 海报
-        self.create_rectangle(30, 12, 52, 34, fill="#2b313d", outline="#3a4150", tags="bg")
-        self.create_text(41, 23, text="AI", fill="#5a6270", font=("Microsoft YaHei UI", 8, "bold"), tags="bg")
-        # 书架与书
-        self.create_rectangle(216, 28, 280, 34, fill="#3a4150", outline="", tags="bg")
-        for i, color in enumerate(("#4a6b5a", "#6b5a4a", "#5a4a6b", "#4a5a6b")):
-            self.create_rectangle(220 + i * 14, 18, 230 + i * 14, 28, fill=color, outline="", tags="bg")
-        # 门（新成员从这里进来）
-        self.create_rectangle(4, 54, 24, 100, fill="#0d0f12", outline="#3a4150", tags="bg")
-        self.create_rectangle(7, 57, 21, 100, fill="#232830", outline="", tags="bg")
-        self.create_rectangle(17, 74, 20, 78, fill="#5a6270", outline="", tags="bg")
+            self.create_line(cx, 0, cx, 6, fill=self.INK, tags="bg")
+            self._obox(cx - 6, 6, cx + 6, 12, "#f8c838")
+            self.create_rectangle(cx - 2, 13, cx + 2, 15, fill="#f8f878", outline="", tags="bg")
+        # 窗户（天空每帧按真实时间重绘，dyn 层补天空）
+        self._obox(70, 12, 104, 40, "#0d0f12", w=2)
+        # 挂钟（白盘黑框，指针每帧按真实时间重绘）
+        self._obox(162, 14, 176, 28, "#f8f8f8", w=2)
+        # 海报（白纸黑框）
+        self._obox(30, 12, 52, 34, "#f8f0d8", w=2)
+        self.create_text(41, 23, text="AI", fill="#d83838", font=("Microsoft YaHei UI", 8, "bold"), tags="bg")
+        # 书架与彩色书脊
+        self._obox(216, 28, 280, 34, "#8a5a28")
+        for i, color in enumerate(("#d83838", "#38a838", "#3c7cfc", "#f8c838")):
+            self._obox(220 + i * 14, 18, 230 + i * 14, 28, color)
+        # 门（木门 + 门板 + 金色把手，新成员从这里进来）
+        self._obox(4, 54, 24, 100, "#8a5a28", w=2)
+        self._obox(8, 58, 20, 76, "#6f4720")
+        self._obox(8, 80, 20, 98, "#6f4720")
+        self.create_rectangle(16, 76, 19, 80, fill="#f8c838", outline=self.INK, tags="bg")
         # 服务器机柜（LED 每帧闪烁）
-        self.create_rectangle(30, 50, 56, 100, fill="#141920", outline="#3a4150", tags="bg")
+        self._obox(30, 50, 56, 100, "#40485c", w=2)
         for i in range(4):
-            self.create_rectangle(33, 54 + i * 12, 53, 62 + i * 12, fill="#1b212b", outline="#2b313d", tags="bg")
-        # 办公桌
-        self.create_rectangle(66, 66, 158, 72, fill="#3a4150", outline="", tags="bg")
-        self.create_rectangle(70, 72, 74, 100, fill="#2b313d", outline="", tags="bg")
-        self.create_rectangle(150, 72, 154, 100, fill="#2b313d", outline="", tags="bg")
+            self._obox(33, 54 + i * 12, 53, 62 + i * 12, "#2b3140")
+        # 办公桌（木桌 + 粗桌腿）
+        self._obox(66, 66, 158, 72, "#b87a3e", w=2)
+        self._obox(70, 72, 76, 100, "#8a5a28")
+        self._obox(148, 72, 154, 100, "#8a5a28")
         # 桌前地毯（猫睡这里）
-        self.create_rectangle(62, 100, 162, 106, fill="#2e3540", outline="#343c4a", tags="bg")
-        # 绿植
-        self.create_rectangle(162, 88, 174, 100, fill="#4a3a2f", outline="", tags="bg")
-        self.create_rectangle(165, 74, 171, 88, fill="#3f6b4f", outline="", tags="bg")
-        # 沙发
-        self.create_rectangle(210, 64, 274, 78, fill="#323a48", outline="", tags="bg")
-        self.create_rectangle(206, 76, 278, 94, fill="#3a4150", outline="", tags="bg")
-        self.create_rectangle(206, 94, 210, 100, fill="#2b313d", outline="", tags="bg")
-        self.create_rectangle(274, 94, 278, 100, fill="#2b313d", outline="", tags="bg")
+        self._obox(62, 100, 162, 106, "#d8b038")
+        # 绿植（花盆 + 圆叶）
+        self._obox(162, 88, 174, 100, "#c05830")
+        self._obox(164, 76, 172, 88, "#38a838")
+        self._obox(166, 72, 170, 78, "#38a838")
+        # 沙发（绿色双人沙发）
+        self._obox(210, 64, 274, 78, "#48a858", w=2)   # 靠背
+        self._obox(206, 76, 278, 94, "#58b868", w=2)   # 坐垫
+        self.create_line(242, 78, 242, 92, fill=self.INK, tags="bg")  # 坐垫中缝
+        self._obox(206, 94, 210, 100, "#8a5a28")       # 木腿
+        self._obox(274, 94, 278, 100, "#8a5a28")
         # Bug 区地毯（在机柜前面壁思过）
-        self.create_rectangle(28, 106, 58, 112, fill="#4a3436", outline="", tags="bg")
+        self._obox(28, 106, 58, 112, "#b04848")
 
     def update_agents(self, agents):
         """agents: [(key, state, color)]，为每个成员分配目标位置。"""
@@ -617,24 +629,24 @@ class Office(tk.Canvas):
                                  font=("Microsoft YaHei UI", 7, "bold"), tags="actor")
 
     def _draw_ambient(self):
-        """横板场景氛围动画：昼夜窗外、真实挂钟、机柜 LED、咖啡热气、睡觉的猫。"""
+        """横板场景氛围动画：昼夜窗外、真实挂钟、机柜 LED、睡觉的猫。"""
         self.delete("dyn")
         i = self.frame
         # 窗外：白天出太阳，夜晚星星月亮
         day = 6 <= time.localtime().tm_hour < 18
-        self.create_rectangle(73, 15, 101, 37, fill="#23303f" if day else "#10151f", outline="", tags="dyn")
+        self.create_rectangle(73, 15, 101, 37, fill="#5cb8fc" if day else "#1c2440", outline="", tags="dyn")
         if day:
-            self.create_rectangle(92, 18, 97, 23, fill="#c8a44a", outline="", tags="dyn")
+            self.create_rectangle(92, 18, 97, 23, fill="#f8f878", outline=self.INK, tags="dyn")
         else:
-            self.create_rectangle(92, 18, 96, 22, fill="#c8cdd5", outline="", tags="dyn")
+            self.create_rectangle(92, 18, 96, 22, fill="#f8f8f8", outline=self.INK, tags="dyn")
             for sx, sy in ((76, 18), (82, 30), (88, 24), (78, 33)):
-                self.create_rectangle(sx, sy, sx + 1, sy + 1, fill="#5a6270", outline="", tags="dyn")
-        self.create_line(87, 15, 87, 37, fill="#0d0f12", tags="dyn")
+                self.create_rectangle(sx, sy, sx + 1, sy + 1, fill="#f8f8f8", outline="", tags="dyn")
+        self.create_line(87, 15, 87, 37, fill=self.INK, tags="dyn")
         # 挂钟：真实时间
         t = time.localtime()
         cx, cy = 169, 21
-        for angle, length, color in (((t.tm_hour % 12 + t.tm_min / 60) * 30 - 90, 3, "#c8cdd5"),
-                                     (t.tm_min * 6 - 90, 5, "#9199a5")):
+        for angle, length, color in (((t.tm_hour % 12 + t.tm_min / 60) * 30 - 90, 3, self.INK),
+                                     (t.tm_min * 6 - 90, 5, "#687cae")):
             rad = math.radians(angle)
             self.create_line(cx, cy, cx + length * math.cos(rad), cy + length * math.sin(rad),
                              fill=color, tags="dyn")
@@ -643,15 +655,15 @@ class Office(tk.Canvas):
             for led in range(2):
                 on = (i + slot + led) % (2 + led) == 0
                 self.create_rectangle(49 + led * 3, 56 + slot * 12, 51 + led * 3, 58 + slot * 12,
-                                      fill=("#99ddb6" if led == 0 else "#efad83") if on else "#2b313d",
+                                      fill=("#54fc54" if led == 0 else "#fc5454") if on else "#1c2230",
                                       outline="", tags="dyn")
         # 地毯上睡觉的猫：尾巴摆动
-        self.create_rectangle(66, 94, 76, 99, fill="#6b7280", outline="", tags="dyn")
-        self.create_rectangle(66, 91, 71, 95, fill="#6b7280", outline="", tags="dyn")
+        self._obox(66, 94, 76, 99, "#b8b8b8", tag="dyn")
+        self._obox(66, 91, 71, 95, "#b8b8b8", tag="dyn")
         if (i // 5) % 2 == 0:
-            self.create_rectangle(76, 90, 78, 95, fill="#6b7280", outline="", tags="dyn")
+            self._obox(76, 90, 78, 95, "#b8b8b8", tag="dyn")
         else:
-            self.create_rectangle(76, 95, 79, 97, fill="#6b7280", outline="", tags="dyn")
+            self._obox(76, 95, 79, 97, "#b8b8b8", tag="dyn")
 
 
 class Widget:
