@@ -14,5 +14,8 @@
   "bookcase": [33, 921, 290, 1214],
   "rug": [309, 1016, 701, 1179],
   "cat": [713, 1019, 955, 1200],
-  "arcade": [1014, 902, 1210, 1219]
+  "arcade": [1014, 902, 1210, 1219],
+  "meeting-table": {"image": "meeting-furniture.png", "rect": [79, 262, 1012, 570]},
+  "whiteboard": {"image": "meeting-furniture.png", "rect": [1101, 105, 1617, 570]},
+  "meeting-chair": {"image": "meeting-furniture.png", "rect": [1753, 172, 2079, 570]}
 }

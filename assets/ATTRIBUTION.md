@@ -4,6 +4,9 @@
 
 ## 模块化房间与家具（当前素材）
 
+- 2026-09-28 新增 `rooms/meeting-shell.png`（2172×724）和透明 `rooms/meeting-furniture.png`（2172×724），由 Codex 内置 imagegen 生成；会议桌、白板和椅子分别裁切为独立物品，原图保留。对应 `.prompt.txt` 保存完整提示词。
+- 两位美少女现在固定作为 Codex / Kimi 的常驻伙伴，图像本身不表示真实子代理数量。
+
 - 2026-09-27 通过 Codex 内置 imagegen 为本项目生成，原始 PNG 保留；当前场景未使用第三方家具图片。
 - `rooms/studio-shell.png`、`rooms/lounge-shell.png`、`rooms/bedroom-shell.png`：分别为工作室、休闲厅和卧室建筑背景，原图均为 2172×724。
 - 建筑背景包含墙面、窗户、地板和固定装饰；工作室、休闲厅的墙灯属于背景。可摆放家具、角色与猫由独立精灵层绘制。

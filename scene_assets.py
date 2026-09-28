@@ -13,6 +13,7 @@ class SceneAssets:
     def __init__(self, master):
         self.master, self.cache = master, {}
         self.sheet, self.rectangles = None, {}
+        self.sheets = {}
         try:
             self.rectangles = json.loads((ASSETS / "furniture-atlas.json").read_text(encoding="utf-8"))
             self.sheet = tk.PhotoImage(master=master, file=str(ASSETS / "furniture-atlas.png"))
@@ -23,9 +24,17 @@ class SceneAssets:
         key = (name, width, height)
         if key not in self.cache:
             try:
-                x1, y1, x2, y2 = self.rectangles[name]
+                entry = self.rectangles[name]
+                sheet = self.sheet
+                if isinstance(entry, dict):
+                    filename = entry["image"]
+                    if filename not in self.sheets:
+                        self.sheets[filename] = tk.PhotoImage(master=self.master, file=str(ASSETS / filename))
+                    sheet = self.sheets[filename]
+                    entry = entry["rect"]
+                x1, y1, x2, y2 = entry
                 source = tk.PhotoImage(master=self.master, width=x2-x1, height=y2-y1)
-                self.master.tk.call(source, "copy", self.sheet, "-from", x1, y1, x2, y2)
+                self.master.tk.call(source, "copy", sheet, "-from", x1, y1, x2, y2)
                 factor = max(1, math.ceil(max(source.width()/width, source.height()/height)))
                 self.cache[key] = source.subsample(factor)
             except (KeyError, TypeError, ValueError, tk.TclError):

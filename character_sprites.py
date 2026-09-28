@@ -27,7 +27,7 @@ def character_bank(widget):
 class CharacterSprites:
     def __init__(self, root):
         self.root = root
-        self.assignments = {}
+        self.assignments = {"companion:codex": 0, "companion:kimi": 1}
         self.started = time.monotonic()
         self.frames = {}
         base = Path(__file__).resolve().parent / "assets"

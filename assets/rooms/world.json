@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "rooms": ["studio.json", "lounge.json", "bedroom.json"],
+  "rooms": ["studio.json", "meeting.json", "lounge.json", "bedroom.json"],
   "status_rooms": {"active": "studio", "idle": "lounge", "systemError": "studio", "notLoaded": "studio", "unknown": "studio"}
 }

@@ -20,6 +20,7 @@ import urllib.request
 
 from pixel_world import PixelWorld
 from character_sprites import character_bank, draw_fallback, member_key
+from companion_sources import CompanionMonitor
 
 
 HOME = Path.home()
@@ -493,6 +494,12 @@ class Widget:
         self.closing = False
         self.refresh_timer = None
         self.last_data = {}
+        self.last_thread_sample = 0.0
+        self.companion_monitor = CompanionMonitor()
+        self.companion_busy = False
+        self.companion_timer = None
+        self.last_companion_sample = time.monotonic()
+        self.companions = []
         self.world_expanded = False
         self.world_progress = 0.0
         self.world_animation = None
@@ -500,7 +507,6 @@ class Widget:
         self.panel_x = 0
         self.panel_y = 0
         self.panel_height = 1
-        self.current_agents = []
         self.team_stats = load_team_stats()
         self.last_sample: float | None = None
         self.last_busy = False
@@ -549,6 +555,8 @@ class Widget:
         self.root.after(1500, self._watch_screen)
         self.root.after(280, self._tick)
         self.refresh()
+        self._render_companions(None)
+        self.refresh_companions()
 
     def label(self, parent, text="", *, fg=None, bg=None, size=9, bold=False, **kw):
         return tk.Label(parent, text=text, bg=bg or self.BG, fg=fg or self.TEXT,
@@ -592,6 +600,10 @@ class Widget:
                 row[1].advance()
         if not self.collapsed:
             self.world_view.advance()
+        if time.monotonic()-self.last_companion_sample > 15:
+            self.last_companion_sample = time.monotonic()
+            self._render_companions(None)
+        self.meeting_button.configure(text="结束会议" if self.world_view.meeting_active else "开总结会")
         self.root.after(280, self._tick)
 
     def _build(self) -> None:
@@ -663,9 +675,10 @@ class Widget:
         self.task_rows = [self._member_card(self.details) for _ in range(3)]
         team_header = tk.Frame(self.details, bg=self.BG)
         team_header.pack(fill="x", pady=(9, 0))
-        self.agent_summary = self.label(team_header, "AI 团队 · 等待读取", bold=True, size=9)
+        self.agent_summary = self.label(team_header, "常驻伙伴", bold=True, size=9)
         self.agent_summary.pack(side="left")
         self.world_button = self.button(team_header, "展开画卷", self.toggle_world)
+        self.meeting_button = self.button(team_header, "开总结会", self.toggle_meeting)
         # The slot participates in the narrow column's layout. The real canvas is
         # a sibling of the chrome so it can unroll beyond that column's bounds.
         self.world_slot = tk.Frame(self.details, width=294, height=PixelWorld.HEIGHT, bg=self.BG)
@@ -676,13 +689,18 @@ class Widget:
         self.root.bind("<Escape>", lambda _event: self.close_world())
         self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
         self.memo.pack(fill="x", pady=(4, 0))
-        self.agent_rows = [self._member_card(self.details) for _ in range(3)]
+        self.agent_rows = [self._member_card(self.details) for _ in range(2)]
 
         self.footer = tk.Frame(outer, bg=self.BG)
         self.footer.pack(fill="x", padx=12, pady=(8, 8))
         self.status = self.label(self.footer, "正在连接…", fg=self.MUTED, size=8)
         self.status.pack(side="left")
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
+
+    def toggle_meeting(self):
+        self.open_world()
+        self.world_view.toggle_meeting()
+        self.world_view.focus_set()
 
     def toggle_world(self):
         if self.collapsed or self.closing:
@@ -926,17 +944,39 @@ class Widget:
             data["kimi_error"] = True
         self.events.put(("ok", data))
 
+    def refresh_companions(self):
+        if self.closing or self.companion_busy:
+            return
+        self.companion_busy = True
+        self.companion_timer = None
+        threads = (list(self.last_data.get("threads", []))
+                   if self.last_thread_sample and time.monotonic()-self.last_thread_sample <= 60 else [])
+        def fetch():
+            try:
+                partners = self.companion_monitor.snapshot(threads)
+            except Exception:
+                partners = None
+            self.events.put(("companions", partners))
+        threading.Thread(target=fetch, daemon=True).start()
+
     def _drain(self) -> None:
         if self.closing:
             return
         try:
             while True:
                 kind, value = self.events.get_nowait()
+                if kind == "companions":
+                    self.companion_busy = False
+                    self.last_companion_sample = time.monotonic()
+                    self._render_companions(value)
+                    self.companion_timer = self.root.after(2000, self.refresh_companions)
+                    continue
                 self.busy = False
                 self.refresh_button.configure(state="normal")
                 if kind == "ok":
                     self._render(value)  # type: ignore[arg-type]
                 else:
+                    self.last_thread_sample = 0.0
                     self.status.configure(text="连接失败 · 20 秒后重试")
                 self.refresh_timer = self.root.after(POLL_SECONDS * 1000, self.refresh)
         except queue.Empty:
@@ -982,6 +1022,7 @@ class Widget:
 
     def _render(self, data: dict) -> None:
         self.last_data = data
+        self.last_thread_sample = 0.0 if data.get("threads_error") else time.monotonic()
         limits = data.get("limits", {})
         buckets = limits.get("rateLimitsByLimitId") or {}
         snapshot = buckets.get("codex") or limits.get("rateLimits") or {}
@@ -1010,7 +1051,8 @@ class Widget:
         tasks = [t for t in threads if not is_agent(t)]
         self.task_summary.configure(text=f"最近任务 · {len(tasks)}")
         self._render_tasks(tasks, data)
-        self._render_agents(agents, threads, data)
+        has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
+        self.status.configure(text="部分额度/列表不可用" if has_error else f"{time.strftime('%H:%M:%S')} · 额度20秒 / 伙伴2秒")
         if not data.get("threads_error"):
             self._sample_team_stats(tasks, agents)
         else:
@@ -1093,68 +1135,36 @@ class Widget:
             ts = thread.get("recencyAt") or thread.get("updatedAt")
             sub.configure(text=rel_time(ts) if isinstance(ts, (int, float)) and ts > 0 else " ")
 
-    def _render_agents(self, agents: list, threads: list, data: dict) -> None:
-        """马维斯风格的 AI 团队面板：成员卡片 + 口语化状态 + 角色/归属/活跃时间。"""
-        character_bank(self.root).register(agents)
-        self.agent_summary.configure(
-            text=f"AI 团队 · {len(agents)} 位成员" if agents else
-            ("AI 团队 · 状态读取失败" if data.get("threads_error") else "AI 团队 · 暂无成员"))
-        by_id = {t.get("id"): t for t in threads if t.get("id")}
-        status_map = {
-            "active": ("干活中", self.ACCENT),
-            "idle": ("待命", self.MUTED),
-            "notLoaded": ("状态未知", self.MUTED),
-            "systemError": ("异常", "#efad83"),
-        }
-        agents = sorted(agents, key=lambda t: ((t.get("status") or {}).get("type") == "active",
-                                               t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
-        for i, (card, sprite, name, status, sub) in enumerate(self.agent_rows):
-            if i >= len(agents):
-                if i == 0:
-                    card.pack(fill="x", pady=(4, 0))
-                    sprite.set_empty()
-                    name.configure(text="状态读取失败" if data.get("threads_error") else "暂无团队成员", fg=self.MUTED)
-                    status.configure(text="")
-                    sub.configure(text="")
-                else:
-                    card.pack_forget()
-                continue
-            card.pack(fill="x", pady=(4, 0))
-            thread = agents[i]
-            state = (thread.get("status") or {}).get("type", "unknown")
-            state_text, color = status_map.get(state, ("未知", self.MUTED))
-            nm = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名成员"
-            nm = " ".join(str(nm).split())
-            if len(nm) > 14:
-                nm = nm[:13] + "…"
-            name.configure(text=nm, fg=self.TEXT)
-            status.configure(text=state_text, fg=color)
-            sprite.set_character(member_key(thread), state)
-            parts = []
-            role = thread.get("agentRole")
-            if role:
-                parts.append(str(role))
-            parent = by_id.get(thread.get("parentThreadId"))
-            if parent:
-                pn = parent.get("agentNickname") or parent.get("name") or "主任务"
-                pn = " ".join(str(pn).split())
-                if len(pn) > 12:
-                    pn = pn[:11] + "…"
-                parts.append(f"归属 {pn}")
-            ts = thread.get("recencyAt") or thread.get("updatedAt")
-            if isinstance(ts, (int, float)) and ts > 0:
-                parts.append(rel_time(ts))
-            sub.configure(text=" · ".join(parts) or " ")
-        self.current_agents = agents
-        self.world_view.set_agents(agents)
-        has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
-        self.status.configure(text="部分数据不可用 · 自动重试" if has_error else f"{time.strftime('%H:%M:%S')} 更新 · 每 20 秒")
+    def _render_companions(self, partners):
+        """Two stable mascots show observed task / request state, never old agent IDs."""
+        if not partners:
+            partners = [dict(id="companion:"+key, name=name, agentNickname=name,
+                             status={"type": "unknown"}, statusText="状态未知",
+                             task="正在读取任务" if key == "codex" else "正在连接调用状态",
+                             detail="等待本机状态更新", phase="unknown", turn_id="", thread_id="")
+                        for key, name in (("codex", "Codex"), ("kimi", "Kimi"))]
+        self.companions = partners
+        character_bank(self.root).register(partners)
+        for (card, sprite, name, status, sub), partner in zip(self.agent_rows, partners):
+            state = partner.get("status", {}).get("type", "unknown")
+            color = self.ACCENT if state == "active" else "#efad83" if state == "systemError" else self.MUTED
+            name.configure(text=partner["name"] + (" · 当前任务" if partner["name"] == "Codex" else " · 模型调用"))
+            status.configure(text=partner.get("statusText", "状态未知")[:8], fg=color)
+            sprite.set_character(partner["id"], state)
+            task = " ".join(str(partner.get("task") or "暂无任务信息").split())
+            detail = " ".join(str(partner.get("detail") or "").split())
+            task = task if len(task) <= 54 else task[:53]+"…"
+            detail = detail if len(detail) <= 56 else detail[:55]+"…"
+            sub.configure(text=task+("\n"+detail if detail else ""))
+        self.world_view.set_companions(partners)
         self.resize()
 
     def close(self) -> None:
         if self.closing:
             return
         self.closing = True
+        if self.companion_timer is not None:
+            self.root.after_cancel(self.companion_timer)
         self.save()
         self.close_world(immediate=True)
         if self.layout_timer is not None:

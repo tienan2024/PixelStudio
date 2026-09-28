@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import tkinter as tk
+import time
 
 from scene_actors import ActorLayer, LABELS
 from scene_assets import SceneAssets
@@ -36,6 +37,9 @@ class PixelWorld(tk.Canvas):
         self.objects.sort(key=lambda obj: obj.spec.get("layer", 20))
         self.by_id = {obj.id: obj for obj in self.objects}
         self.members = ActorLayer(self, self.rooms, status_rooms)
+        self.companions, self.last_codex = [], {}
+        self.meeting_until, self.meeting_manual = 0.0, False
+        self.dismissed_turn = None
         self._background()
         for obj in self.objects:
             obj.draw()
@@ -72,21 +76,66 @@ class PixelWorld(tk.Canvas):
             self.create_text(room.x+28, 41, anchor="w", text=f"0{i}  {room.label}",
                              fill="#d3bd94", font=("Microsoft YaHei UI", 8), tags="architecture")
 
-    def set_agents(self, threads):
-        self.members.set_agents(threads)
+    @property
+    def meeting_active(self):
+        return self.meeting_manual or time.monotonic() < self.meeting_until
+
+    def set_companions(self, companions):
+        self.companions = companions
+        codex = next((item for item in companions if item["id"] == "companion:codex"), {})
+        key = (codex.get("thread_id"), codex.get("turn_id"))
+        previous_key = (self.last_codex.get("thread_id"), self.last_codex.get("turn_id"))
+        fresh_completion = (key == previous_key and bool(key[1]) and
+                            self.last_codex.get("status", {}).get("type") == "active" and
+                            codex.get("status", {}).get("type") == "idle" and
+                            0 <= time.time()-codex.get("ended_at", 0) < 30 and
+                            codex.get("statusText") not in {"已中止", "已暂停"})
+        if key != self.dismissed_turn and (codex.get("phase") == "summary" or fresh_completion):
+            was_active = self.meeting_active
+            self.meeting_until = time.monotonic() + 35
+            if not was_active and self.expanded:
+                self.select_room("meeting")
+        elif (not self.meeting_manual and codex.get("phase") == "working" and
+              key != previous_key and bool(key[1])):
+            self.meeting_until = 0.0
+        self.last_codex = codex
+        self._sync_companions()
         self._live()
+
+    def toggle_meeting(self):
+        if self.meeting_active:
+            self.meeting_until, self.meeting_manual = 0.0, False
+            self.dismissed_turn = (self.last_codex.get("thread_id"), self.last_codex.get("turn_id"))
+        else:
+            self.meeting_manual = True
+            self.select_room("meeting")
+        self._sync_companions()
+        self._live()
+
+    def _sync_companions(self):
+        was_seated = any(a.get("meeting") for a in self.members.actors.values())
+        meeting = self.meeting_active
+        self.members.set_companions(self.companions, meeting=meeting)
+        if was_seated and not meeting and self.room_id == "meeting":
+            self.select_room("studio")
 
     def advance(self):
         self.frame += 1
         self.state.tick()
+        if not self.meeting_active and any(a.get("meeting") for a in self.members.actors.values()):
+            self._sync_companions()
         self.members.advance()
         self._live()
 
     def _live(self):
         for obj in self.objects:
             obj.animate(self.frame)
-            obj.raise_layers()
+            if obj.spec.get("layer", 20) < 40:
+                obj.raise_layers()
         self.members.draw()
+        for obj in self.objects:
+            if obj.spec.get("layer", 20) >= 40:
+                obj.raise_layers()
         self._highlight()
         self._overlay()
 
@@ -127,7 +176,7 @@ class PixelWorld(tk.Canvas):
 
     def _enter(self, _event):
         if self.expanded and self.selected_object:
-            self.state.activate(self.selected_object)
+            self._activate_object(self.selected_object)
             self._live()
         elif self.on_toggle:
             self.on_toggle()
@@ -144,31 +193,33 @@ class PixelWorld(tk.Canvas):
         if width >= 600:
             self.create_text(left+20, 12, text="PIXEL STUDIO", anchor="w", fill="#e2c58b",
                              font=("Consolas", 9, "bold"), tags="overlay")
+        tab_width = min(66, (width-start-18)//len(self.rooms))
         for i, room in enumerate(self.rooms):
-            x = left+start+i*66
+            x = left+start+i*tab_width
             active = room.id == self.room_id
             if active:
-                self.rect(x-6, 3, 60, 18, "#3b4b4d", "overlay")
-            self.create_text(x+24, 12, text=room.label, fill="#edd3a3" if active else "#8eaaa9",
+                self.rect(x-6, 3, tab_width-6, 18, "#3b4b4d", "overlay")
+            self.create_text(x+(tab_width-18)/2, 12, text=room.label, fill="#edd3a3" if active else "#8eaaa9",
                              font=("Microsoft YaHei UI", 8), tags="overlay")
-            self.tabs.append((x-6, x+54, room.id))
+            self.tabs.append((x-6, x+tab_width-12, room.id))
         if width >= 700:
-            count = f"{self.members.active} 运行 · {self.members.total} 成员"
-            if self.members.total > len(self.members.actors):
-                count += f" · 展示 {len(self.members.actors)}"
+            count = "总结会议 · Codex / Kimi" if self.meeting_active else f"{self.members.active} 忙碌 · Codex / Kimi"
             self.create_text(left+width-22, 12, text=count, anchor="e", fill="#a5c8bc",
                              font=("Microsoft YaHei UI", 8), tags="overlay")
         target = self.hovered or self.selected_object
         actor = self.members.actors.get(self.members.selected)
         if target:
-            info = self.state.describe(target)
+            if self.by_id[target].spec.get("action") == "meeting":
+                info = "点击结束总结会" if self.meeting_active else "点击召集 Codex 与 Kimi 开总结会"
+            else:
+                info = self.state.describe(target)
             if self.hovered:
                 info += "  ·  点击互动"
         elif actor:
-            info = f"{actor['name']} · {actor['role']} · {LABELS[actor['state']]}"
+            info = f"{actor['name']} · {actor['state_text']} · {actor['task']}"
         else:
-            info = ("点击家具互动  ·  滚轮平移 / 1–3 切换房间  ·  两侧卷轴收起" if self.expanded else
-                    f"{self.members.total} 位成员 · 点击展开画卷")
+            info = (f"点击伙伴查看任务 · 滚轮平移 / 1–{len(self.rooms)} 切换房间 · 点击白板开会" if self.expanded else
+                    "Codex / Kimi 伙伴 · 点击展开画卷")
         limit = max(12, (width-38)//11)
         info = info if len(info) <= limit else info[:limit-1]+"…"
         self.create_text(left+width/2, 212, text=info, fill="#bfc8c7",
@@ -185,6 +236,10 @@ class PixelWorld(tk.Canvas):
                 self.rect(left+width-cut, yy, cut, 2, self.edge_colors[1], "overlay")
 
     def _object_at(self, x, y):
+        foreground = next((obj.id for obj in reversed(self.objects)
+                           if obj.spec.get("layer", 20) >= 40 and obj.hit(x, y)), None)
+        if foreground:
+            return foreground
         if self.members.hit(x, y):
             return None
         return next((obj.id for obj in reversed(self.objects) if obj.hit(x, y)), None)
@@ -221,7 +276,9 @@ class PixelWorld(tk.Canvas):
                     return
         if not 24 < y < 200:
             return
-        member = self.members.hit(x, y)
+        foreground = next((obj.id for obj in reversed(self.objects)
+                           if obj.spec.get("layer", 20) >= 40 and obj.hit(x, y)), None)
+        member = None if foreground else self.members.hit(x, y)
         if member:
             self.members.selected, self.selected_object, self.hovered = member, None, None
             if self.on_select:
@@ -231,5 +288,11 @@ class PixelWorld(tk.Canvas):
             self.selected_object = key
             self.members.selected = None
             if key:
-                self.state.activate(key)
+                self._activate_object(key)
         self._live()
+
+    def _activate_object(self, key):
+        if self.by_id[key].spec.get("action") == "meeting":
+            self.toggle_meeting()
+        else:
+            self.state.activate(key)

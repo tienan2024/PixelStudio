@@ -1,0 +1,13 @@
+{
+  "id": "meeting", "label": "会议室", "width": 560, "arrival": 280,
+  "background": "meeting-shell.png",
+  "objects": [
+    {"id":"meeting-rug","asset":"rug","label":"会议地毯","x":280,"y":199,"size":[270,58],"layer":0,"interaction":"inspect","states":[""],"description":"围坐下来，整理今天的收获"},
+    {"id":"meeting-books","asset":"bookcase","label":"资料书架","x":46,"y":180,"size":[64,108],"layer":20,"interaction":"cycle","states":["设计资料","项目笔记","灵感归档"]},
+    {"id":"meeting-plant","asset":"plant","label":"会议室绿植","x":109,"y":182,"size":[45,74],"layer":20,"interaction":"pulse","states":["安静生长","浇水中"],"effect":"water","duration":4},
+    {"id":"meeting-chair-codex","asset":"meeting-chair","label":"Codex 的座位","x":227,"y":182,"size":[46,58],"layer":20,"interaction":"inspect","states":[""],"description":"总结时 Codex 伙伴在这里入座"},
+    {"id":"meeting-chair-kimi","asset":"meeting-chair","label":"Kimi 的座位","x":337,"y":182,"size":[46,58],"layer":20,"interaction":"inspect","states":[""],"description":"总结时 Kimi 伙伴在这里入座"},
+    {"id":"meeting-board","asset":"whiteboard","label":"总结白板","x":467,"y":177,"size":[101,103],"layer":20,"interaction":"inspect","states":[""],"description":"点击召集伙伴或结束会议","action":"meeting"},
+    {"id":"meeting-table","asset":"meeting-table","label":"会议长桌","x":282,"y":192,"size":[268,91],"layer":40,"interaction":"inspect","states":[""],"description":"点击召集伙伴或结束会议","action":"meeting"}
+  ]
+}

@@ -1,4 +1,4 @@
-"""Real member identities and movement, independent of furniture state."""
+"""Persistent Codex/Kimi companions, independent from historical subagent rows."""
 from character_sprites import character_bank, draw_fallback, member_key
 
 COLORS = {"active": "#9bdbba", "idle": "#9bbad6", "systemError": "#eb9c80",
@@ -15,25 +15,28 @@ class ActorLayer:
         self.actors, self.total, self.active = {}, 0, 0
         self.selected = None
 
-    def set_agents(self, threads):
+    def set_companions(self, threads, *, meeting=False):
         self.characters.register(threads)
-        ordered = sorted(threads, key=lambda t: ((t.get("status") or {}).get("type") != "active", member_key(t)))
+        ordered = sorted(threads, key=lambda t: member_key(t))
         self.total = len(threads)
         self.active = sum((t.get("status") or {}).get("type") == "active" for t in threads)
-        actors, occupied = {}, {key: [] for key in self.rooms}
-        for thread in ordered[:12]:
+        actors = {}
+        for index, thread in enumerate(ordered[:2]):
             key = member_key(thread)
             state = (thread.get("status") or {}).get("type", "unknown")
             state = state if state in COLORS else "unknown"
-            room = self.rooms[self.status_rooms[state]]
-            candidates = sorted(range(40, room.width-30, 38), key=lambda x: abs(x-room.arrival))
-            local_x = next((x for x in candidates if x not in occupied[room.id]), room.arrival)
-            occupied[room.id].append(local_x)
-            tx, ty = room.x+local_x, 190
+            room = self.rooms["meeting" if meeting else self.status_rooms[state]]
+            local_x = (227, 337)[index] if meeting else (210, 366)[index]
+            tx, ty = room.x+local_x, 158 if meeting else 190
             actor = self.actors.get(key, {"x": tx, "y": ty})
+            if actor.get("room", room.id) != room.id:
+                # Enter through a room transition; do not spend a minute crossing the map.
+                actor.update(x=tx-28, y=ty)
             actor.update(tx=tx, ty=ty, state=state, room=room.id,
                          name=" ".join(str(thread.get("agentNickname") or thread.get("name") or "AI 成员").split()),
-                         role=str(thread.get("agentRole") or "子代理"))
+                         role="常驻伙伴", task=thread.get("task", "状态读取中"),
+                         detail=thread.get("detail", ""), state_text=thread.get("statusText", LABELS[state]),
+                         phase=thread.get("phase", "unknown"), meeting=meeting)
             actors[key] = actor
         self.actors = actors
         if self.selected not in actors:
@@ -68,9 +71,18 @@ class ActorLayer:
                               font=("Consolas", 10, "bold"), tags="actors")
             if key == self.selected:
                 c.create_rectangle(x-9, y+3, x+9, y+5, fill="#f3ca7d", outline="", tags="actors")
+            label = a["name"] + " · " + ("总结会" if a["meeting"] else a["state_text"])
+            a["label_bounds"] = (x-54, y-height-24, x+54, y-height-9)
+            c.create_rectangle(x-54, y-height-24, x+54, y-height-9,
+                               fill="#1c2b36", outline="#475758", tags="actors")
+            c.create_text(x, y-height-17, text=label[:18], fill=COLORS[a["state"]],
+                          font=("Microsoft YaHei UI", 7), tags="actors")
 
     def hit(self, x, y):
         for key, actor in reversed(sorted(self.actors.items(), key=lambda item: item[1]["y"])):
+            lx, ly, rx, ry = actor.get("label_bounds", (0, 0, 0, 0))
+            if lx <= x < rx and ly <= y < ry:
+                return key
             left, top, right, bottom = actor.get("bounds", (0, 0, 0, 0))
             if left <= x < right and top <= y < bottom:
                 image = actor.get("image")
