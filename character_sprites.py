@@ -30,6 +30,7 @@ class CharacterSprites:
         self.assignments = {"companion:codex": 0, "companion:kimi": 1}
         self.started = time.monotonic()
         self.frames = {}
+        self.mirrored, self.motion = {}, {}
         base = Path(__file__).resolve().parent / "assets"
         try:
             spec = json.loads((base / "characters-idle.json").read_text(encoding="utf-8"))
@@ -47,6 +48,22 @@ class CharacterSprites:
                 self.frames[size] = variants
         except (OSError, ValueError, KeyError, TypeError, tk.TclError):
             self.frames.clear()
+        try:
+            spec = json.loads((base / "characters-motion.json").read_text(encoding="utf-8"))
+            sheet = tk.PhotoImage(master=root, file=str(base / spec["image"]))
+            for pose in ("walk", "sit", "speak"):
+                variants = []
+                for row in spec["rows"]:
+                    factor = max(1, math.ceil(max(r[3]-r[1] for r in row["walk"]) / 64))
+                    frames = []
+                    for x1, y1, x2, y2 in row[pose]:
+                        crop = tk.PhotoImage(master=root, width=x2-x1, height=y2-y1)
+                        root.tk.call(crop, "copy", sheet, "-from", x1, y1, x2, y2)
+                        frames.append(crop.subsample(factor))
+                    variants.append(frames)
+                self.motion[pose] = variants
+        except (OSError, ValueError, KeyError, TypeError, tk.TclError):
+            self.motion.clear()
 
     def register(self, threads):
         # Assign before either view sorts by recency or state. Retain assignments
@@ -56,7 +73,7 @@ class CharacterSprites:
                 counts = [sum(v == n for v in self.assignments.values()) for n in (0, 1)]
                 self.assignments[key] = 0 if counts[0] <= counts[1] else 1
 
-    def sample(self, key, state, size="world", moving=False):
+    def sample(self, key, state, size="world", moving=False, pose="idle", facing=1):
         if not self.frames:
             return None, 0, 0
         if key not in self.assignments:
@@ -68,15 +85,34 @@ class CharacterSprites:
         if elapsed % blink_period < 0.36:
             frame = 2
         elif moving:
-            frame = (0, 3)[int(elapsed/0.28) % 2]
+            frame = (0, 3, 1, 3)[int(elapsed/0.16) % 4]
+        elif pose == "speaking":
+            frame = (0, 1, 3, 1)[int(elapsed/0.32) % 4]
         else:
             frame = (0, 1, 0, 3)[int(elapsed/1.12) % 4]
         breath_period = 2.8 if state == "active" else 3.6
         breathe = -1 if math.sin(elapsed * math.tau / breath_period) > 0.5 else 0
         sway = 1 if int(elapsed/2.8) % 4 == 3 else 0
         if moving:
-            breathe = -(int(elapsed/0.28) % 2)
-        return self.frames[size][self.assignments[key]][frame], sway, breathe
+            breathe = -(int(elapsed/0.16) % 2)
+            sway = 0
+        elif pose == "listening":
+            breathe = 1 if elapsed % 3.2 < 0.45 else 0
+        elif pose == "speaking":
+            breathe = -1 if elapsed % 0.64 < 0.25 else 0
+        image = self.frames[size][self.assignments[key]][frame]
+        if size == "world" and self.motion:
+            if moving:
+                image = self.motion["walk"][self.assignments[key]][int(elapsed/.16) % 4]
+            elif pose == "speaking":
+                image = self.motion["speak"][self.assignments[key]][int(elapsed/.45) % 2]
+            elif pose == "listening":
+                image = self.motion["sit"][self.assignments[key]][1 if elapsed % blink_period < .45 else 0]
+        if facing < 0:
+            if str(image) not in self.mirrored:
+                self.mirrored[str(image)] = image.subsample(-1, 1)
+            image = self.mirrored[str(image)]
+        return image, sway, breathe
 
 
 def draw_fallback(canvas, x, feet, variant, tag):

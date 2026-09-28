@@ -498,6 +498,7 @@ class Widget:
         self.companion_monitor = CompanionMonitor()
         self.companion_busy = False
         self.companion_timer = None
+        self.scene_timer = None
         self.last_companion_sample = time.monotonic()
         self.companions = []
         self.world_expanded = False
@@ -554,6 +555,7 @@ class Widget:
         self.root.after(200, self._drain)
         self.root.after(1500, self._watch_screen)
         self.root.after(280, self._tick)
+        self.scene_timer = self.root.after(60, self._scene_tick)
         self.refresh()
         self._render_companions(None)
         self.refresh_companions()
@@ -592,19 +594,24 @@ class Widget:
         return shell, sprite, name, status, sub
 
     def _tick(self) -> None:
-        """全局动画心跳：推进所有像素小人与办公室场景的帧。"""
+        """卡片心跳与状态过期处理，独立于画卷动画。"""
         if self.closing:
             return
         for rows in (self.task_rows, self.agent_rows):
             for row in rows:
                 row[1].advance()
-        if not self.collapsed:
-            self.world_view.advance()
         if time.monotonic()-self.last_companion_sample > 15:
             self.last_companion_sample = time.monotonic()
             self._render_companions(None)
-        self.meeting_button.configure(text="结束会议" if self.world_view.meeting_active else "开总结会")
         self.root.after(280, self._tick)
+
+    def _scene_tick(self):
+        self.scene_timer = None
+        if self.closing:
+            return
+        if not self.collapsed:
+            self.world_view.advance()
+        self.scene_timer = self.root.after(60, self._scene_tick)
 
     def _build(self) -> None:
         self.chrome = RoundedWindow(self.root, self.WIDTH, bg=self.chrome_bg, fill=self.BG)
@@ -678,7 +685,6 @@ class Widget:
         self.agent_summary = self.label(team_header, "常驻伙伴", bold=True, size=9)
         self.agent_summary.pack(side="left")
         self.world_button = self.button(team_header, "展开画卷", self.toggle_world)
-        self.meeting_button = self.button(team_header, "开总结会", self.toggle_meeting)
         # The slot participates in the narrow column's layout. The real canvas is
         # a sibling of the chrome so it can unroll beyond that column's bounds.
         self.world_slot = tk.Frame(self.details, width=294, height=PixelWorld.HEIGHT, bg=self.BG)
@@ -696,11 +702,6 @@ class Widget:
         self.status = self.label(self.footer, "正在连接…", fg=self.MUTED, size=8)
         self.status.pack(side="left")
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
-
-    def toggle_meeting(self):
-        self.open_world()
-        self.world_view.toggle_meeting()
-        self.world_view.focus_set()
 
     def toggle_world(self):
         if self.collapsed or self.closing:
@@ -750,6 +751,7 @@ class Widget:
         # Member identity is shown inside the canvas; the quota/task column is
         # deliberately unaffected by scene interaction.
         self.world_view.focus_set()
+        self.world_view.members.respond(actor["id"])
 
     def _layout_world(self):
         """Keep the panel fixed on screen; only the scene's visible bounds grow."""
@@ -1163,6 +1165,8 @@ class Widget:
         if self.closing:
             return
         self.closing = True
+        if self.scene_timer is not None:
+            self.root.after_cancel(self.scene_timer)
         if self.companion_timer is not None:
             self.root.after_cancel(self.companion_timer)
         self.save()

@@ -7,7 +7,7 @@
     {"id":"meeting-plant","asset":"plant","label":"会议室绿植","x":109,"y":182,"size":[45,74],"layer":20,"interaction":"pulse","states":["安静生长","浇水中"],"effect":"water","duration":4},
     {"id":"meeting-chair-codex","asset":"meeting-chair","label":"Codex 的座位","x":227,"y":182,"size":[46,58],"layer":20,"interaction":"inspect","states":[""],"description":"总结时 Codex 伙伴在这里入座"},
     {"id":"meeting-chair-kimi","asset":"meeting-chair","label":"Kimi 的座位","x":337,"y":182,"size":[46,58],"layer":20,"interaction":"inspect","states":[""],"description":"总结时 Kimi 伙伴在这里入座"},
-    {"id":"meeting-board","asset":"whiteboard","label":"总结白板","x":467,"y":177,"size":[101,103],"layer":20,"interaction":"inspect","states":[""],"description":"点击召集伙伴或结束会议","action":"meeting"},
-    {"id":"meeting-table","asset":"meeting-table","label":"会议长桌","x":282,"y":192,"size":[268,91],"layer":40,"interaction":"inspect","states":[""],"description":"点击召集伙伴或结束会议","action":"meeting"}
+    {"id":"meeting-board","asset":"whiteboard","label":"总结白板","x":467,"y":177,"size":[101,103],"layer":20,"interaction":"inspect","states":[""],"description":"总结时自动展示示意笔迹；伙伴随真实总结状态来开会"},
+    {"id":"meeting-table","asset":"meeting-table","label":"会议长桌","x":282,"y":192,"size":[268,91],"layer":40,"interaction":"inspect","states":[""],"description":"总结时伙伴自动入座，交流结束后返回各自活动区域"}
   ]
 }

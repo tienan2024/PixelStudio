@@ -29,6 +29,12 @@
 - 提示词：`characters-idle.prompt.txt`；原图帧区域：`characters-idle.json`。
 - 程序运行时按帧区域加载，并以整数最近邻采样制作世界人物和成员卡头像。
 
+## 像素美少女动作精灵
+
+- `characters-motion.png`：2026-09-28 通过 Codex 内置 imagegen，以 `characters-idle.png` 为角色参考生成；实际模型 `gpt-image-2`，原生 JSON `/v1/images/edits` 入口。保留 1774×887 透明 RGBA 原图。
+- 两行分别为 Codex 与 Kimi 固定角色；每行四帧步行、两帧坐姿/点头、两帧发言/抬手。提示词和裁切区域见 `characters-motion.prompt.txt`、`characters-motion.json`。
+- 运行时由 Tk 切帧、整数采样和镜像，入座/起立、呼吸和点头配合代码位移；白板、气泡与蒸汽由 `scene_meeting.py` 独立叠加。图片与场景动画均不表示真实消息文本或调用状态。
+
 ## Office worker sprites（历史素材）
 
 - **作者**：emcee-flesher
