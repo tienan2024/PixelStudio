@@ -131,25 +131,6 @@
         "山间故事",
         "星空图鉴"
       ]
-    },
-    {
-      "id": "bedroom-cat",
-      "asset": "cat",
-      "label": "小睡猫",
-      "x": 365,
-      "y": 123,
-      "size": [
-        35,
-        27
-      ],
-      "layer": 30,
-      "interaction": "pulse",
-      "states": [
-        "安静打盹",
-        "轻轻伸懒腰"
-      ],
-      "duration": 4,
-      "effect": "cat"
     }
   ]
 }

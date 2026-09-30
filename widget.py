@@ -19,6 +19,7 @@ import tkinter as tk
 import urllib.request
 
 from pixel_world import PixelWorld
+from widget_instance import WidgetInstance
 from character_sprites import character_bank, draw_fallback, member_key
 from companion_sources import CompanionMonitor
 
@@ -464,6 +465,9 @@ class Widget:
     TASKBAR = 48   # 底部为任务栏预留的高度
 
     def __init__(self) -> None:
+        self.instance = WidgetInstance(Path(__file__).resolve().parents[1] / ".runtime")
+        if not self.instance.acquired:
+            raise SystemExit(0)
         try:
             prefs = json.loads(PREFERENCES.read_text(encoding="utf-8"))
             if not isinstance(prefs, dict):
@@ -690,7 +694,7 @@ class Widget:
         self.world_slot = tk.Frame(self.details, width=294, height=PixelWorld.HEIGHT, bg=self.BG)
         self.world_slot.pack(pady=(6, 0))
         self.world_slot.pack_propagate(False)
-        self.world_view = PixelWorld(self.root, bg=self.chrome_bg,
+        self.world_view = PixelWorld(self.root, bg=self.chrome_bg, pet_live=True,
                                      on_toggle=self.toggle_world, on_select=self._world_select)
         self.root.bind("<Escape>", lambda _event: self.close_world())
         self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
@@ -1170,12 +1174,14 @@ class Widget:
         if self.companion_timer is not None:
             self.root.after_cancel(self.companion_timer)
         self.save()
+        self.world_view.close()
         self.close_world(immediate=True)
         if self.layout_timer is not None:
             self.root.after_cancel(self.layout_timer)
         self.client.stopped = True
         self.client.close()
         self.root.destroy()
+        self.instance.close()
 
     def run(self) -> None:
         self.root.mainloop()

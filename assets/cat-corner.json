@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "objects": [
+    {"id":"food","room":"lounge","x":179,"y":194,"size":[30,20],"asset":"cat-food","empty":"cat-food-empty","action":"feed","label":"橘子的粮碗"},
+    {"id":"water","room":"lounge","x":216,"y":194,"size":[30,20],"asset":"cat-water","empty":"cat-water-empty","action":"water","label":"橘子的水碗"},
+    {"id":"toy","room":"lounge","x":307,"y":194,"size":[20,19],"asset":"cat-yarn","action":"play","label":"橘子的毛线球"},
+    {"id":"bed","room":"bedroom","x":413,"y":195,"size":[57,28],"asset":"cat-bed","action":null,"label":"橘子的软窝"}
+  ]
+}

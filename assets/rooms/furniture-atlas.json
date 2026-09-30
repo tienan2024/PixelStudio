@@ -17,5 +17,11 @@
   "arcade": [1014, 902, 1210, 1219],
   "meeting-table": {"image": "meeting-furniture.png", "rect": [79, 262, 1012, 570]},
   "whiteboard": {"image": "meeting-furniture.png", "rect": [1101, 105, 1617, 570]},
-  "meeting-chair": {"image": "meeting-furniture.png", "rect": [1753, 172, 2079, 570]}
+  "meeting-chair": {"image": "meeting-furniture.png", "rect": [1753, 172, 2079, 570]},
+  "cat-food": {"image":"cat-care.png","rect":[59,290,339,476]},
+  "cat-food-empty": {"image":"cat-care.png","rect":[382,290,664,476]},
+  "cat-water": {"image":"cat-care.png","rect":[716,285,994,476]},
+  "cat-water-empty": {"image":"cat-care.png","rect":[1039,285,1318,476]},
+  "cat-bed": {"image":"cat-care.png","rect":[1372,252,1850,481]},
+  "cat-yarn": {"image":"cat-care.png","rect":[1895,278,2133,497]}
 }

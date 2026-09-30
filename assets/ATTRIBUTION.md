@@ -10,10 +10,18 @@
 - 2026-09-27 通过 Codex 内置 imagegen 为本项目生成，原始 PNG 保留；当前场景未使用第三方家具图片。
 - `rooms/studio-shell.png`、`rooms/lounge-shell.png`、`rooms/bedroom-shell.png`：分别为工作室、休闲厅和卧室建筑背景，原图均为 2172×724。
 - 建筑背景包含墙面、窗户、地板和固定装饰；工作室、休闲厅的墙灯属于背景。可摆放家具、角色与猫由独立精灵层绘制。
-- `rooms/furniture-atlas.png`：1254×1254 的透明图集，包含 16 种独立素材：书桌、显示器、座椅、服务器、绿植、沙发、咖啡机、鱼缸、床、床头柜、台灯、衣柜、书架、地毯、猫和街机。
+- `rooms/furniture-atlas.png`：1254×1254 的透明图集，包含 16 种独立素材：书桌、显示器、座椅、服务器、绿植、沙发、咖啡机、鱼缸、床、床头柜、台灯、衣柜、书架、地毯、猫和街机。旧猫图块与裁切键保留兼容，当前房间不再摆放静态猫。
 - 完整提示词：`rooms/studio-shell.prompt.txt`、`rooms/lounge-shell.prompt.txt`、`rooms/bedroom-shell.prompt.txt`、`rooms/furniture-atlas.prompt.txt`。提示词中的期望尺寸与最终原图尺寸可能不同，以 PNG 为准。
 - `rooms/furniture-atlas.json` 记录原图裁切矩形；房间 JSON 记录摆放与交互。运行时使用 Tkinter 切帧、整数最近邻采样和视口裁切，素材源文件不被改写。
 - 灯光、屏幕、蒸汽等互动效果由程序叠加；真实成员由独立角色层绘制，房间不内置虚构代理。
+
+## 小猫橘子与照护物品
+
+- 2026-09-28 通过 Codex 内置 imagegen 生成，以 `rooms/furniture-atlas.png` 为参考，沿用其中橘猫造型与木色、青绿色像素工作室风格；未引入第三方猫或照护物品图片。
+- `cat-actions.png`：保留 2172×724 透明 RGBA 原图，共 12 帧，包含坐姿 1 帧、眨眼 1 帧、步行 4 帧、进食 2 帧、睡觉 2 帧、玩耍 2 帧。提示词为 `cat-actions.prompt.txt`，裁切矩形和整数采样比例为 `cat-actions.json`。
+- `rooms/cat-care.png`：保留 2172×724 透明 RGBA 原图，包含六个独立图块：满粮碗、空粮碗、满水碗、空水碗、软猫窝、毛线球。提示词为 `rooms/cat-care.prompt.txt`，裁切矩形记录在 `rooms/furniture-atlas.json`。
+- `cat-corner.json` 记录独立物品摆放：粮碗、水碗与毛线球在休闲厅，猫窝在卧室。只有动态小猫橘子在房间之间活动，原 `lounge-cat` / `bedroom-cat` 静态摆件已移除。
+- 运行时由 Tk 切帧、整数采样及镜像，保留生成原图；喝水复用进食帧，摸摸复用待机帧。伙伴伸手、猫粮与水滴、爱心和睡眠提示由程序叠加。小猫心愿来自真实模型返回，与图像生成素材分开。
 
 ## PixelStudio 全景底图（历史素材）
 

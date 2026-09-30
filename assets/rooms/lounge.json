@@ -96,25 +96,6 @@
       "effect": "sofa"
     },
     {
-      "id": "lounge-cat",
-      "asset": "cat",
-      "label": "橘猫",
-      "x": 265,
-      "y": 129,
-      "size": [
-        39,
-        29
-      ],
-      "layer": 30,
-      "interaction": "pulse",
-      "states": [
-        "蜷着打盹",
-        "呼噜呼噜"
-      ],
-      "duration": 5,
-      "effect": "cat"
-    },
-    {
       "id": "lounge-plant",
       "asset": "plant",
       "label": "龟背竹",
