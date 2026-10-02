@@ -25,6 +25,14 @@ def character_bank(widget):
 
 
 class CharacterSprites:
+    WORLD_SCALE = 5/4
+
+    @staticmethod
+    def world_frame(image):
+        # Keep the existing integer sampling, then enlarge by exactly 5:4.
+        # Cache the resulting frames at load time, including their transparency.
+        return image.zoom(5, 5).subsample(4, 4)
+
     def __init__(self, root):
         self.root = root
         self.assignments = {"companion:codex": 0, "companion:kimi": 1}
@@ -43,7 +51,8 @@ class CharacterSprites:
                     for x1, y1, x2, y2 in row:
                         crop = tk.PhotoImage(master=root, width=x2-x1, height=y2-y1)
                         root.tk.call(crop, "copy", sheet, "-from", x1, y1, x2, y2, "-to", 0, 0)
-                        frames.append(crop.subsample(factor))
+                        sampled = crop.subsample(factor)
+                        frames.append(self.world_frame(sampled) if size == "world" else sampled)
                     variants.append(frames)
                 self.frames[size] = variants
         except (OSError, ValueError, KeyError, TypeError, tk.TclError):
@@ -59,7 +68,7 @@ class CharacterSprites:
                     for x1, y1, x2, y2 in row[pose]:
                         crop = tk.PhotoImage(master=root, width=x2-x1, height=y2-y1)
                         root.tk.call(crop, "copy", sheet, "-from", x1, y1, x2, y2)
-                        frames.append(crop.subsample(factor))
+                        frames.append(self.world_frame(crop.subsample(factor)))
                     variants.append(frames)
                 self.motion[pose] = variants
         except (OSError, ValueError, KeyError, TypeError, tk.TclError):
@@ -112,10 +121,11 @@ class CharacterSprites:
             if str(image) not in self.mirrored:
                 self.mirrored[str(image)] = image.subsample(-1, 1)
             image = self.mirrored[str(image)]
-        return image, sway, breathe
+        scale = self.WORLD_SCALE if size == "world" else 1
+        return image, round(sway*scale), round(breathe*scale)
 
 
-def draw_fallback(canvas, x, feet, variant, tag):
+def draw_fallback(canvas, x, feet, variant, tag, *, scale=1):
     """Small human silhouette if the optional PNG cannot be read."""
     hair = "#b7accb" if variant == 0 else "#855b47"
     coat = "#8dad99" if variant == 0 else "#d3a37c"
@@ -125,5 +135,6 @@ def draw_fallback(canvas, x, feet, variant, tag):
         (-6, -8, 5, 8, "#293849"), (1, -8, 5, 8, "#293849"),
         (-3, -29, 2, 2, "#263443"), (2, -29, 2, 2, "#263443"),
     ):
-        canvas.create_rectangle(x+dx, feet+dy, x+dx+w, feet+dy+h,
+        canvas.create_rectangle(round(x+dx*scale), round(feet+dy*scale),
+                                round(x+(dx+w)*scale), round(feet+(dy+h)*scale),
                                 fill=color, outline="", tags=tag)

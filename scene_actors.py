@@ -178,6 +178,7 @@ class ActorLayer:
 
     def draw(self):
         c, now = self.canvas, time.monotonic()
+        scaled = lambda value: round(value*self.characters.WORLD_SCALE)
         c.delete("actors")
         for key, a in sorted(self.actors.items(), key=lambda item: item[1]["y"]):
             x, y = round(a["x"]), round(a["y"])
@@ -188,38 +189,41 @@ class ActorLayer:
             caring_here = caring and not moving
             pose = "speaking" if speaking else "listening" if seated or rising else "idle"
             if seated:
-                y -= round(8*max(0, 1-(now-a["settle_started"])/.4))
+                y -= scaled(8*max(0, 1-(now-a["settle_started"])/.4))
             elif rising:
-                y -= round(8*(1-(a["rise_until"]-now)/.4))
+                y -= scaled(8*(1-(a["rise_until"]-now)/.4))
             elif caring_here:
-                y += 2
+                y += scaled(2)
             tag = ("actors", "actor:"+key)
             a["front"] = y >= 180
-            c.create_rectangle(x-9, y-1, x+9, y+2, fill="#544738", outline="", tags=tag)
+            c.create_rectangle(x-scaled(9), y-scaled(1), x+scaled(9), y+scaled(2), fill="#544738", outline="", tags=tag)
             image, dx, dy = self.characters.sample(key, a["state"], moving=moving and not rising,
                                                    pose=pose, facing=a["facing"])
             if image:
                 width, height = image.width(), image.height()
                 c.create_image(x+dx, y+dy, image=image, anchor="s", tags=tag)
             else:
-                draw_fallback(c, x+dx, y+dy, self.characters.assignments.get(key, 0), tag)
-                width, height = 20, 40
+                draw_fallback(c, x+dx, y+dy, self.characters.assignments.get(key, 0), tag,
+                              scale=self.characters.WORLD_SCALE)
+                width, height = scaled(20), scaled(40)
             a["image"] = image
             a["bounds"] = (x+dx-width//2, y+dy-height, x+dx-width//2+width, y+dy)
             if caring_here:
                 self._draw_care(x+dx, y+dy, height, a, now, tag)
             if now < a["react_until"]:
                 lift = int((now*6) % 2)
-                c.create_line(x+width//2+1, y-height+12, x+width//2+4, y-height+8-lift,
-                              fill="#e6c58a", width=2, tags=tag)
-                c.create_rectangle(x+width//2+6, y-height+4-lift, x+width//2+8, y-height+6-lift,
+                c.create_line(x+width//2+scaled(1), y-height+scaled(12),
+                              x+width//2+scaled(4), y-height+scaled(8-lift),
+                              fill="#e6c58a", width=scaled(2), tags=tag)
+                c.create_rectangle(x+width//2+scaled(6), y-height+scaled(4-lift),
+                                   x+width//2+scaled(8), y-height+scaled(6-lift),
                                    fill="#f0d4a0", outline="", tags=tag)
             badge = "?" if a["state"] in {"unknown", "notLoaded"} else "!" if a["state"] == "systemError" else ""
             if badge and key == self.selected:
-                c.create_text(x-width//2-5, y-height+5, text=badge, fill=COLORS[a["state"]],
-                              font=("Consolas", 10, "bold"), tags=tag)
+                c.create_text(x-width//2-scaled(5), y-height+scaled(5), text=badge, fill=COLORS[a["state"]],
+                              font=("Consolas", scaled(10), "bold"), tags=tag)
             if key == self.selected:
-                c.create_rectangle(x-9, y+3, x+9, y+5, fill="#f3ca7d", outline="", tags=tag)
+                c.create_rectangle(x-scaled(9), y+scaled(3), x+scaled(9), y+scaled(5), fill="#f3ca7d", outline="", tags=tag)
             if a["meeting"]:
                 activity = ("入座中" if moving and y < 185 else "前往会议室") if moving else ("交流中" if speaking else "听取总结")
             elif caring:
@@ -231,42 +235,50 @@ class ActorLayer:
             label = a["name"] + " · " + activity
             a["label_bounds"] = (0, 0, 0, 0)
             if key == self.selected or now < a["react_until"]:
-                a["label_bounds"] = (x-54, y-height-24, x+54, y-height-9)
+                a["label_bounds"] = (x-scaled(54), y-height-scaled(24), x+scaled(54), y-height-scaled(9))
                 c.create_rectangle(*a["label_bounds"], fill="#1c2b36", outline="#475758", tags=tag)
-                c.create_text(x, y-height-17, text=label[:18], fill=COLORS[a["state"]],
-                              font=("Microsoft YaHei UI", 7), tags=tag)
+                c.create_text(x, y-height-scaled(17), text=label[:18], fill=COLORS[a["state"]],
+                              font=("Microsoft YaHei UI", scaled(7)), tags=tag)
 
     def _draw_care(self, x, y, height, actor, now, tag):
         """Small pixel reach and props share the actor's existing draw layer."""
         c = self.canvas
+        scale = self.characters.WORLD_SCALE
+        def rect(x1, y1, x2, y2, **options):
+            c.create_rectangle(round(x+x1*scale), round(y+y1*scale),
+                               round(x+x2*scale), round(y+y2*scale), **options)
+        def line(x1, y1, x2, y2, **options):
+            options["width"] = max(1, round(options.get("width", 1)*scale))
+            c.create_line(round(x+x1*scale), round(y+y1*scale),
+                          round(x+x2*scale), round(y+y2*scale), **options)
         elapsed = max(0, now-(actor["care_started"] or now))
         beat = int(elapsed/.38) % 4
         bob = (0, 1, 0, -1)[beat]
-        hand_x, hand_y = x+16, y-max(15, height//2)+8+bob
+        hand_x, hand_y = 16, -max(15, height/(2*scale))+8+bob
         sleeve = "#8dad99" if self.characters.assignments.get(actor["id"], 0) == 0 else "#d3a37c"
-        c.create_rectangle(x+5, hand_y-10, x+10, hand_y-3, fill=sleeve, outline="", tags=tag)
-        c.create_rectangle(x+8, hand_y-5, hand_x, hand_y, fill=sleeve, outline="", tags=tag)
-        c.create_rectangle(hand_x-1, hand_y-3, hand_x+4, hand_y+1, fill="#e9c6a7", outline="", tags=tag)
+        rect(5, hand_y-10, 10, hand_y-3, fill=sleeve, outline="", tags=tag)
+        rect(8, hand_y-5, hand_x, hand_y, fill=sleeve, outline="", tags=tag)
+        rect(hand_x-1, hand_y-3, hand_x+4, hand_y+1, fill="#e9c6a7", outline="", tags=tag)
         action = self.care["action"]
         if action in {"feed", "water"}:
             color = "#dfb579" if action == "feed" else "#8fcad4"
             for index in range(3):
                 drop = (beat+index*2) % 6
                 px, py = hand_x+4+index*3, hand_y+3+drop*3
-                c.create_rectangle(px, py, px+2, py+(2 if action == "feed" else 3),
+                rect(px, py, px+2, py+(2 if action == "feed" else 3),
                                    fill=color, outline="", tags=tag)
         elif action == "play":
-            c.create_line(hand_x+2, hand_y-1, hand_x+13, hand_y-7,
+            line(hand_x+2, hand_y-1, hand_x+13, hand_y-7,
                           fill="#d9bd8c", width=2, tags=tag)
-            c.create_line(hand_x+13, hand_y-7, hand_x+15+bob, hand_y+7,
+            line(hand_x+13, hand_y-7, hand_x+15+bob, hand_y+7,
                           fill="#ead9b8", width=1, tags=tag)
-            c.create_rectangle(hand_x+12+bob, hand_y+7, hand_x+18+bob, hand_y+11,
+            rect(hand_x+12+bob, hand_y+7, hand_x+18+bob, hand_y+11,
                                fill="#d89179", outline="", tags=tag)
         else:
             hx, hy = hand_x+8, hand_y-12-bob
             for ox, oy, width, height in ((0, 0, 3, 3), (5, 0, 3, 3),
                                           (0, 2, 8, 3), (2, 5, 4, 2), (3, 7, 2, 1)):
-                c.create_rectangle(hx+ox, hy+oy, hx+ox+width, hy+oy+height,
+                rect(hx+ox, hy+oy, hx+ox+width, hy+oy+height,
                                    fill="#dca395", outline="", tags=tag)
 
     def raise_walkers(self):
