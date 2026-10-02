@@ -215,7 +215,7 @@ class ActorLayer:
                 c.create_rectangle(x+width//2+6, y-height+4-lift, x+width//2+8, y-height+6-lift,
                                    fill="#f0d4a0", outline="", tags=tag)
             badge = "?" if a["state"] in {"unknown", "notLoaded"} else "!" if a["state"] == "systemError" else ""
-            if badge:
+            if badge and key == self.selected:
                 c.create_text(x-width//2-5, y-height+5, text=badge, fill=COLORS[a["state"]],
                               font=("Consolas", 10, "bold"), tags=tag)
             if key == self.selected:
@@ -229,10 +229,12 @@ class ActorLayer:
             else:
                 activity = a["state_text"]
             label = a["name"] + " · " + activity
-            a["label_bounds"] = (x-54, y-height-24, x+54, y-height-9)
-            c.create_rectangle(*a["label_bounds"], fill="#1c2b36", outline="#475758", tags=tag)
-            c.create_text(x, y-height-17, text=label[:18], fill=COLORS[a["state"]],
-                          font=("Microsoft YaHei UI", 7), tags=tag)
+            a["label_bounds"] = (0, 0, 0, 0)
+            if key == self.selected or now < a["react_until"]:
+                a["label_bounds"] = (x-54, y-height-24, x+54, y-height-9)
+                c.create_rectangle(*a["label_bounds"], fill="#1c2b36", outline="#475758", tags=tag)
+                c.create_text(x, y-height-17, text=label[:18], fill=COLORS[a["state"]],
+                              font=("Microsoft YaHei UI", 7), tags=tag)
 
     def _draw_care(self, x, y, height, actor, now, tag):
         """Small pixel reach and props share the actor's existing draw layer."""

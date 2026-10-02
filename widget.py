@@ -514,6 +514,7 @@ class Widget:
         self.world_progress = 0.0
         self.world_animation = None
         self.layout_timer = None
+        self._save_after_layout = False
         self.panel_x = 0
         self.panel_y = 0
         self.panel_height = 1
@@ -560,11 +561,12 @@ class Widget:
             x, y = max_x, 80
         self.panel_x, self.panel_y, self.panel_height = x, y, height
         self._layout_world()
+        self.root.update_idletasks()
         self.root.deiconify()
         self.root.after(200, self._drain)
         self.root.after(1500, self._watch_screen)
         self.root.after(280, self._tick)
-        self.scene_timer = self.root.after(60, self._scene_tick)
+        self.scene_timer = self.root.after(33, self._scene_tick)
         self.refresh()
         self._render_companions(None)
         self.refresh_companions()
@@ -622,9 +624,19 @@ class Widget:
         self.scene_timer = None
         if self.closing:
             return
+        started = time.monotonic()
         if not self.collapsed:
+            if self.world_animation is not None:
+                began, origin, target, duration = self.world_animation
+                t = min(1.0, (started-began)/duration)
+                self.world_progress = origin+(target-origin)*(1-(1-t)**3)
+                if t >= 1:
+                    self.world_animation = None
+                self._layout_world()
             self.world_view.advance()
-        self.scene_timer = self.root.after(60, self._scene_tick)
+        # Account for work already spent; reveal and world share one frame clock.
+        elapsed = round((time.monotonic()-started)*1000)
+        self.scene_timer = self.root.after(max(1, 33-elapsed), self._scene_tick)
 
     def _build(self) -> None:
         self.chrome = RoundedWindow(self.root, self.WIDTH, bg=self.chrome_bg, fill=self.BG)
@@ -702,10 +714,9 @@ class Widget:
         self.task_rows = [self._member_card(self.tasks_body) for _ in range(3)]
         team_header = tk.Frame(self.details, bg=self.BG)
         team_header.pack(fill="x", pady=(9, 0))
-        self.agent_summary = self.label(team_header, "常驻伙伴", bold=True, size=9)
+        self.agent_summary = self.label(team_header, "像素工作室", bold=True, size=9)
         self.agent_summary.pack(side="left")
         self.world_button = self.button(team_header, "展开画卷", self.toggle_world)
-        self.pet_button = self.button(team_header, "找橘子", self.focus_pet)
         # The slot participates in the narrow column's layout. The real canvas is
         # a sibling of the chrome so it can unroll beyond that column's bounds.
         self.world_slot = tk.Frame(self.details, width=294, height=PixelWorld.HEIGHT, bg=self.BG)
@@ -714,8 +725,6 @@ class Widget:
         self.world_view = PixelWorld(self.root, bg=self.chrome_bg, pet_live=True,
                                      on_toggle=self.toggle_world, on_select=self._world_select)
         self.root.bind("<Escape>", self._escape)
-        self.root.bind("<Control-j>", self.focus_pet)
-        self.root.bind("<Control-J>", self.focus_pet)
         self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
         self.memo.pack(fill="x", pady=(4, 0))
         self.agent_rows = [self._member_card(self.details) for _ in range(2)]
@@ -725,16 +734,6 @@ class Widget:
         self.status = self.label(self.footer, "正在连接…", fg=self.MUTED, size=8)
         self.status.pack(side="left")
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
-
-    def focus_pet(self, _event=None):
-        if self.closing:
-            return "break"
-        if self.collapsed:
-            self.toggle_fold()
-        self.open_world()
-        self.world_view.focus_pet()
-        self.world_view.focus_set()
-        return "break"
 
     def _escape(self, _event=None):
         if not self.world_view.dismiss_pet():
@@ -752,9 +751,7 @@ class Widget:
             self._animate_world(True)
 
     def close_world(self, *, immediate=False):
-        if self.world_animation is not None:
-            self.root.after_cancel(self.world_animation)
-            self.world_animation = None
+        self.world_animation = None
         if immediate or self.closing:
             self.world_expanded = False
             self.world_progress = 0.0
@@ -763,27 +760,15 @@ class Widget:
         self._animate_world(False)
 
     def _animate_world(self, expanded):
-        if self.world_animation is not None:
-            self.root.after_cancel(self.world_animation)
-            self.world_animation = None
         self.world_expanded = expanded
         self.world_button.configure(text="收起画卷" if expanded else "展开画卷")
         origin, target = self.world_progress, float(expanded)
-        started = time.monotonic()
-        duration = max(0.10, 0.42 * abs(target - origin))
-
-        def step():
-            self.world_animation = None
-            if self.closing or self.collapsed:
-                return
-            t = min(1.0, (time.monotonic() - started) / duration)
-            ease = 1 - (1 - t) ** 3
-            self.world_progress = origin + (target - origin) * ease
-            self._layout_world()
-            if t < 1:
-                self.world_animation = self.root.after(16, step)
-
-        step()
+        if abs(target-origin) < .001:
+            self.world_progress, self.world_animation = target, None
+        else:
+            duration = max(.10, .42*abs(target-origin))
+            self.world_animation = (time.monotonic(), origin, target, duration)
+        self._layout_world()
 
     def _world_select(self, actor):
         # Member identity is shown inside the canvas; the quota/task column is
@@ -808,50 +793,72 @@ class Widget:
         maximum = max(compact, min(PixelWorld.WIDTH, sw - 2 * self.MARGIN))
         maximum -= maximum % 2
         width = compact + round((maximum - compact) * self.world_progress / 2) * 2
-        scene_x = panel_x + slot_x - (width - compact) // 2
-        margin = round(self.MARGIN * self.world_progress)
-        scene_x = max(margin, min(scene_x, sw - width - margin))
+        # Preallocate the full transparent surface even while the scroll is shut.
+        # Resizing a mapped Tk canvas can expose unpainted background for a frame.
+        host_width = maximum
+        host_x = panel_x+slot_x-(host_width-compact)//2
+        host_margin = self.MARGIN if host_width > compact else 0
+        host_x = max(host_margin, min(host_x, sw-host_width-host_margin))
+        compact_x = panel_x+slot_x
+        fraction = (width-compact)/max(1, maximum-compact)
+        scene_x = round(compact_x+(host_x-compact_x)*fraction)
+        if host_width == compact:
+            scene_x = host_x
+        surface_x = min(host_x, compact_x)
+        surface_right = max(host_x+host_width, compact_x+compact)
+        surface_width = surface_right-surface_x
         if self.collapsed:
             root_x, root_right = panel_x, panel_x + self.WIDTH
             self.world_view.place_forget()
         else:
-            root_x = min(panel_x, scene_x)
-            root_right = max(panel_x + self.WIDTH, scene_x + width)
-        self.chrome.place_configure(x=panel_x - root_x, y=0, width=self.WIDTH, height=height)
-        self.root.geometry(f"{root_right - root_x}x{height}+{root_x}+{panel_y}")
+            root_x = min(panel_x, surface_x)
+            root_right = max(panel_x+self.WIDTH, surface_right)
+        chrome_bounds = (panel_x-root_x, height)
+        if chrome_bounds != getattr(self, "_chrome_bounds", None):
+            self.chrome.place_configure(x=chrome_bounds[0], y=0, width=self.WIDTH, height=height)
+            self._chrome_bounds = chrome_bounds
+        geometry = f"{root_right-root_x}x{height}+{root_x}+{panel_y}"
+        if geometry != getattr(self, "_host_geometry", None):
+            self.root.geometry(geometry)
+            self._host_geometry = geometry
         if not self.collapsed:
-            self.world_view.place(x=scene_x - root_x, y=slot_y, width=width, height=PixelWorld.HEIGHT)
-            self.world_view.set_viewport(
-                width, expanded=self.world_expanded,
-                left_bg=self.BG if panel_x <= scene_x <= panel_x + self.WIDTH - 12 else self.chrome_bg,
-                right_bg=self.BG if panel_x + 12 <= scene_x + width <= panel_x + self.WIDTH else self.chrome_bg,
-            )
+            scene_bounds = (surface_x-root_x, slot_y, surface_width)
+            if scene_bounds != getattr(self, "_scene_bounds", None) or not self.world_view.winfo_manager():
+                self.world_view.place(x=scene_bounds[0], y=slot_y, width=surface_width, height=PixelWorld.HEIGHT)
+                self._scene_bounds = scene_bounds
+        # Prepare the closed mask while hidden as well, before mapping it again.
+        self.world_view.set_viewport(
+            width, expanded=self.world_expanded,
+            offset=scene_x-surface_x, surface_width=surface_width,
+            panel_mask=(panel_x-surface_x, panel_x+self.WIDTH-surface_x, self.BG),
+            left_bg=self.BG if panel_x <= scene_x <= panel_x+self.WIDTH-12 else self.chrome_bg,
+            right_bg=self.BG if panel_x+12 <= scene_x+width <= panel_x+self.WIDTH else self.chrome_bg,
+        )
+        if not self.collapsed:
             # Canvas.lift is a canvas-item method; explicitly lift the widget.
-            self.root.tk.call("raise", self.world_view._w)
+            if not getattr(self, "_world_raised", False):
+                self.root.tk.call("raise", self.world_view._w)
+                self._world_raised = True
 
     def resize(self):
-        if self.layout_timer is not None:
-            self.root.after_cancel(self.layout_timer)
-            self.layout_timer = None
-        self.root.update_idletasks()
-        self.chrome._fit_height()
-        self.root.update_idletasks()
-        self.panel_height = self.chrome.winfo_reqheight()
-        self._resize_settle()
-        self.layout_timer = self.root.after_idle(self._resize_settle)
+        if not self.closing and self.layout_timer is None:
+            self.layout_timer = self.root.after_idle(self._resize_settle)
 
     def _resize_settle(self):
-        """Settle card height changes before positioning the scene slot."""
+        """Measure after Tk has settled cards, without nested idle-loop paints."""
+        self.layout_timer = None
         if self.closing:
             return
-        self.layout_timer = None
-        self.root.update_idletasks()
-        self.panel_height = self.chrome.winfo_reqheight()
+        self.chrome._fit_height()
+        self.panel_height = int(self.chrome.cget("height"))
         if "bottom" in self.snapped:
-            self.panel_y = max(0, self.root.winfo_screenheight() - self.panel_height - self.TASKBAR)
+            self.panel_y = max(0, self.root.winfo_screenheight()-self.panel_height-self.TASKBAR)
         else:
-            self.panel_y = max(0, min(self.panel_y, self.root.winfo_screenheight() - self.panel_height))
+            self.panel_y = max(0, min(self.panel_y, self.root.winfo_screenheight()-self.panel_height))
         self._layout_world()
+        if getattr(self, "_save_after_layout", False):
+            self._save_after_layout = False
+            self.save()
 
     def snap_position(self, x: int, y: int) -> tuple[int, int, set[str]]:
         """把候选位置吸附到桌面边缘或水平中线，返回 (x, y, 吸附边集合)。"""
@@ -933,8 +940,8 @@ class Widget:
             self.details.pack_forget()
         else:
             self.details.pack(fill="x", padx=12, pady=(8, 0), before=self.footer)
+        self._save_after_layout = True
         self.resize()
-        self.save()
 
     def toggle_history(self):
         self.tasks_collapsed = not self.tasks_collapsed
@@ -943,8 +950,8 @@ class Widget:
             self.tasks_body.pack_forget()
         else:
             self.tasks_body.pack(fill="x", after=self.tasks_button.master)
+        self._save_after_layout = True
         self.resize()
-        self.save()
 
     def toggle_pin(self):
         self.pinned = not self.pinned

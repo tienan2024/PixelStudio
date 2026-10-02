@@ -289,9 +289,11 @@ class PetLayer:
         if self.pose == "pet":
             c.create_text(x+15, y-h-5-int(now*2)%3, text="♥", fill="#e3ad9b", font=("Segoe UI", 8), tags="pet")
         label = "橘子 · "+ACTIVITY[self.pose]
-        self.label_bounds = (x-47, y-h-19, x+47, y-h-5)
-        c.create_rectangle(*self.label_bounds, fill="#243936", outline="#6c8264", tags="pet")
-        c.create_text(x, y-h-12, text=label, fill="#e3d2a9", font=("Microsoft YaHei UI", 7), tags="pet")
+        self.label_bounds = (0, 0, 0, 0)
+        if self.selected:
+            self.label_bounds = (x-47, y-h-19, x+47, y-h-5)
+            c.create_rectangle(*self.label_bounds, fill="#243936", outline="#6c8264", tags="pet")
+            c.create_text(x, y-h-12, text=label, fill="#e3d2a9", font=("Microsoft YaHei UI", 7), tags="pet")
         brain = self.brain.snapshot()
         if now < self.bubble_until and brain["last_thought"]:
             thought = brain["last_thought"]
