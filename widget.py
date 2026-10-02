@@ -489,6 +489,9 @@ class Widget:
             pass
         self.pinned = bool(prefs.get("pinned", True))
         self.collapsed = bool(prefs.get("collapsed", False))
+        self.tasks_collapsed = prefs.get("tasks_collapsed", True)
+        if not isinstance(self.tasks_collapsed, bool):
+            self.tasks_collapsed = True
         self.root.attributes("-topmost", self.pinned)
         self.root.attributes("-alpha", 0.97)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -498,6 +501,8 @@ class Widget:
         self.closing = False
         self.refresh_timer = None
         self.last_data = {}
+        self.last_data_sample = time.monotonic()
+        self.data_expired = False
         self.last_thread_sample = 0.0
         self.companion_monitor = CompanionMonitor()
         self.companion_busy = False
@@ -604,8 +609,12 @@ class Widget:
         for rows in (self.task_rows, self.agent_rows):
             for row in rows:
                 row[1].advance()
-        if time.monotonic()-self.last_companion_sample > 15:
-            self.last_companion_sample = time.monotonic()
+        now = time.monotonic()
+        if not self.data_expired and now-self.last_data_sample > 60:
+            self._invalidate_data()
+            self.status.configure(text="额度与任务状态已过期 · 将自动重试")
+        if now-self.last_companion_sample > 15:
+            self.last_companion_sample = now
             self._render_companions(None)
         self.root.after(280, self._tick)
 
@@ -681,14 +690,22 @@ class Widget:
         self.details = tk.Frame(outer, bg=self.BG)
         if not self.collapsed:
             self.details.pack(fill="x", padx=12, pady=(8, 0))
-        self.task_summary = self.label(self.details, "最近任务", bold=True, size=9)
-        self.task_summary.pack(fill="x")
-        self.task_rows = [self._member_card(self.details) for _ in range(3)]
+        tasks_header = tk.Frame(self.details, bg=self.BG)
+        tasks_header.pack(fill="x")
+        self.task_summary = self.label(tasks_header, "任务记录 · 0", bold=True, size=9)
+        self.task_summary.pack(side="left")
+        self.tasks_button = self.button(tasks_header, "展开" if self.tasks_collapsed else "收起",
+                                        self.toggle_history)
+        self.tasks_body = tk.Frame(self.details, bg=self.BG)
+        if not self.tasks_collapsed:
+            self.tasks_body.pack(fill="x")
+        self.task_rows = [self._member_card(self.tasks_body) for _ in range(3)]
         team_header = tk.Frame(self.details, bg=self.BG)
         team_header.pack(fill="x", pady=(9, 0))
         self.agent_summary = self.label(team_header, "常驻伙伴", bold=True, size=9)
         self.agent_summary.pack(side="left")
         self.world_button = self.button(team_header, "展开画卷", self.toggle_world)
+        self.pet_button = self.button(team_header, "找橘子", self.focus_pet)
         # The slot participates in the narrow column's layout. The real canvas is
         # a sibling of the chrome so it can unroll beyond that column's bounds.
         self.world_slot = tk.Frame(self.details, width=294, height=PixelWorld.HEIGHT, bg=self.BG)
@@ -696,7 +713,9 @@ class Widget:
         self.world_slot.pack_propagate(False)
         self.world_view = PixelWorld(self.root, bg=self.chrome_bg, pet_live=True,
                                      on_toggle=self.toggle_world, on_select=self._world_select)
-        self.root.bind("<Escape>", lambda _event: self.close_world())
+        self.root.bind("<Escape>", self._escape)
+        self.root.bind("<Control-j>", self.focus_pet)
+        self.root.bind("<Control-J>", self.focus_pet)
         self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
         self.memo.pack(fill="x", pady=(4, 0))
         self.agent_rows = [self._member_card(self.details) for _ in range(2)]
@@ -706,6 +725,21 @@ class Widget:
         self.status = self.label(self.footer, "正在连接…", fg=self.MUTED, size=8)
         self.status.pack(side="left")
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
+
+    def focus_pet(self, _event=None):
+        if self.closing:
+            return "break"
+        if self.collapsed:
+            self.toggle_fold()
+        self.open_world()
+        self.world_view.focus_pet()
+        self.world_view.focus_set()
+        return "break"
+
+    def _escape(self, _event=None):
+        if not self.world_view.dismiss_pet():
+            self.close_world()
+        return "break"
 
     def toggle_world(self):
         if self.collapsed or self.closing:
@@ -902,6 +936,16 @@ class Widget:
         self.resize()
         self.save()
 
+    def toggle_history(self):
+        self.tasks_collapsed = not self.tasks_collapsed
+        self.tasks_button.configure(text="展开" if self.tasks_collapsed else "收起")
+        if self.tasks_collapsed:
+            self.tasks_body.pack_forget()
+        else:
+            self.tasks_body.pack(fill="x", after=self.tasks_button.master)
+        self.resize()
+        self.save()
+
     def toggle_pin(self):
         self.pinned = not self.pinned
         self.root.attributes("-topmost", self.pinned)
@@ -919,6 +963,7 @@ class Widget:
             PREFERENCES.write_text(json.dumps({
                 "x": x, "y": y,
                 "pinned": self.pinned, "collapsed": self.collapsed,
+                "tasks_collapsed": self.tasks_collapsed,
                 "snapped": sorted(self.snapped),
                 "screen": [sw, sh],
                 "x_ratio": x / max(1, sw - w),
@@ -982,12 +1027,20 @@ class Widget:
                 if kind == "ok":
                     self._render(value)  # type: ignore[arg-type]
                 else:
-                    self.last_thread_sample = 0.0
+                    self._invalidate_data()
                     self.status.configure(text="连接失败 · 20 秒后重试")
                 self.refresh_timer = self.root.after(POLL_SECONDS * 1000, self.refresh)
         except queue.Empty:
             pass
         self.root.after(200, self._drain)
+
+    def _invalidate_data(self) -> None:
+        """Clear old quota/list state once, without replacing companion observations."""
+        if self.data_expired:
+            return
+        self._render({"limits_error": True, "threads_error": True,
+                      "kimi_error": True, "threads": []})
+        self.data_expired = True
 
     def _render_kimi(self, data: dict) -> None:
         kimi = data.get("kimi") or {}
@@ -995,7 +1048,7 @@ class Widget:
             self.kimi_membership.configure(text="")
             self.kimi_value.configure(text="—", fg=self.TEXT)
             self.kimi_bar.delete("all")
-            self.kimi_reset.configure(text="读取失败 · 检查 Kimi Code 配置" if data.get("kimi_error") else "暂无数据")
+            self.kimi_reset.configure(text="额度暂不可用 · 将自动重试" if data.get("kimi_error") else "暂无数据")
             return
         membership = kimi.get("membership") or ""
         level = KIMI_LEVELS.get(membership, membership.replace("LEVEL_", "").title() if membership else "")
@@ -1028,6 +1081,8 @@ class Widget:
 
     def _render(self, data: dict) -> None:
         self.last_data = data
+        self.last_data_sample = time.monotonic()
+        self.data_expired = False
         self.last_thread_sample = 0.0 if data.get("threads_error") else time.monotonic()
         limits = data.get("limits", {})
         buckets = limits.get("rateLimitsByLimitId") or {}
@@ -1038,7 +1093,7 @@ class Widget:
             name, bar, value = row
             name.configure(text=window_caption(window, fallback))
             text = pct(window)
-            value.configure(text=text)
+            value.configure(text=text, fg=self.TEXT)
             bar.delete("all")
             if text != "—":
                 remaining = float(text[:-1])
@@ -1047,7 +1102,7 @@ class Widget:
                 value.configure(fg=color)
             if window and isinstance(window.get("resetsAt"), (int, float)):
                 resets.append(time.strftime("%m/%d %H:%M", time.localtime(window["resetsAt"])))
-        self.reset_label.configure(text=("读取失败 · 检查 Codex 登录" if data.get("limits_error") else
+        self.reset_label.configure(text=("额度暂不可用 · 将自动重试" if data.get("limits_error") else
                                         "重置 " + " / ".join(resets) if resets else "暂无重置信息"))
 
         self._render_kimi(data)
@@ -1055,7 +1110,7 @@ class Widget:
         threads = data.get("threads", [])
         agents = [t for t in threads if is_agent(t)]
         tasks = [t for t in threads if not is_agent(t)]
-        self.task_summary.configure(text=f"最近任务 · {len(tasks)}")
+        self.task_summary.configure(text=f"任务记录 · {len(tasks)}")
         self._render_tasks(tasks, data)
         has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
         self.status.configure(text="部分额度/列表不可用" if has_error else f"{time.strftime('%H:%M:%S')} · 额度20秒 / 伙伴2秒")

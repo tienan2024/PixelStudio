@@ -292,14 +292,24 @@ class PetBrain:
 
     def snapshot(self) -> dict:
         now = time.time()
-        remaining = max(0, 6 - sum(ts > now - 3600 for ts in self._attempts))
+        limit = 6
+        # Keep future timestamps after clock rollback, as request() does.
+        attempts = sorted(ts for ts in self._attempts if ts > now - 3600)
+        used = len(attempts)
+        remaining = max(0, limit - used)
+        next_request_at = max(now, self._last_attempt + 60)
+        if used >= limit:
+            next_request_at = max(next_request_at, attempts[-limit] + 3600)
+        retry_after_seconds = max(0, math.ceil(next_request_at - now))
         busy = self._inflight is not None
         status = ("已关闭" if self._closed else "模型决策已暂停" if not self.enabled else
-                  "模型正在思考" if busy else "模型调用异常" if self._error else "本小时额度已用完" if not remaining else
-                  "等待调用间隔" if now - self._last_attempt < 60 else "等待宠物决策")
+                  "模型正在思考" if busy else "模型调用异常" if self._error else "自动思考休息中" if not remaining else
+                  "稍后可以再想一想" if now - self._last_attempt < 60 else "等待宠物决策")
         return {"enabled": self.enabled, "busy": busy, "model": self.model, "status": status,
                 "error": self._error, "last_decision": dict(self._last_decision) if self._last_decision else None,
-                "last_thought": self._last_decision["thought"] if self._last_decision else "", "calls_remaining": remaining}
+                "last_thought": self._last_decision["thought"] if self._last_decision else "", "calls_remaining": remaining,
+                "next_request_at": next_request_at, "retry_after_seconds": retry_after_seconds,
+                "limit_per_hour": limit, "used_last_hour": used}
 
     def set_enabled(self, enabled: bool):
         if self._closed:

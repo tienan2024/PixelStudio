@@ -65,7 +65,8 @@ class PetLayer:
         self.last_need, self.last_tick = self.state.need(), time.monotonic()
         self.approved_at, self.next_roam, self.bubble_until = 0., 0., 0.
         self.selected, self.panel_hits, self.hits = False, [], {}
-        self.journal_index = 0
+        self.journal_page, self.show_journal = 0, False
+        self.pointer = None
         self.bounds, self.label_bounds, self.photo = (0, 0, 0, 0), (0, 0, 0, 0), None
 
     @property
@@ -74,16 +75,61 @@ class PetLayer:
 
     def request_care(self, action):
         self.selected = True
+        self.show_journal = False
         if not self.live:
             self.message = "场景预览 · 未连接模型"
         elif not self.brain.snapshot()["enabled"]:
             self.message = "先开启右上方的模型决策"
+        elif self.brain.snapshot()["busy"]:
+            self.message = "正在等待橘子的决定，请稍候"
         elif self.plan and self.plan["action"] in CARE:
             self.message = "正在照顾橘子，请稍等一会儿"
         else:
             self.requested_action = action
-            self.message = f"已请模型安排{CARE[action]}"
+            self.message = f"已排队：{CARE[action]}，可以取消"
             self.next_check = 0
+
+    @staticmethod
+    def _time_ago(at):
+        seconds = max(0, time.time()-at)
+        if seconds < 60:
+            return "刚刚"
+        if seconds < 3600:
+            return f"{int(seconds//60)} 分钟前"
+        if seconds < 86400:
+            return f"{int(seconds//3600)} 小时前"
+        return f"{int(seconds//86400)} 天前"
+
+    @staticmethod
+    def _wait_text(seconds):
+        seconds = max(1, math.ceil(seconds))
+        return f"{seconds} 秒" if seconds < 60 else f"{math.ceil(seconds/60)} 分钟"
+
+    def status_text(self, brain=None):
+        brain = brain or self.brain.snapshot()
+        if not self.live:
+            return "场景预览 · 未连接模型"
+        if not brain["enabled"]:
+            return brain["error"] or "自动照护已暂停"
+        if self.plan and self.plan["action"] in CARE:
+            if self.members.meeting:
+                return "伙伴在开会 · 散会后继续照顾"
+            name = "Codex" if self.plan["caregiver"] == "codex" else "Kimi"
+            verb = CARE[self.plan["action"]]
+            return f"{name} 正在{verb}" if self.stage == "caring" else f"{name} 正在赶来{verb}"
+        if brain["busy"]:
+            return "橘子正在想一想…"
+        wait = brain.get("retry_after_seconds", 0)
+        if self.requested_action:
+            suffix = "等散会" if self.members.meeting else self._wait_text(wait)+"后可安排" if wait else "等待安排"
+            return f"已排队：{CARE[self.requested_action]} · {suffix}"
+        if brain["error"]:
+            return brain["error"]
+        if not brain["calls_remaining"]:
+            return "自动思考休息中 · "+self._wait_text(wait)+"后可用"
+        if self.plan and self.plan["action"] in {"sleep", "explore"}:
+            return f"橘子 · {ACTIVITY[self.pose]}"
+        return self.message or f"橘子在{self.rooms[self.room_id].label} · {ACTIVITY[self.pose]}"
 
     def toggle(self):
         if not self.live:
@@ -293,43 +339,65 @@ class PetLayer:
         self.panel_bounds = (x, y, x+w, 193)
         def label(px, py, text, color="#c6cfbc", **kw):
             c.create_text(px, py, text=text, fill=color, font=("Microsoft YaHei UI", 8), tags=tag, **kw)
-        def button(x1, y1, x2, y2, text, action, accent=False):
-            c.create_rectangle(x1, y1, x2, y2, fill="#4b6351" if accent else "#304840", outline="#637b64", tags=tag)
-            label((x1+x2)/2, (y1+y2)/2, text, "#efdcac")
-            self.panel_hits.append(((x1, y1, x2, y2), action))
-        label(x+12, 43, "橘子的小日子", "#efdcac", anchor="w")
+        def button(x1, y1, x2, y2, text, action, *, enabled=True, accent=False):
+            box = (x1, y1, x2, y2)
+            hovered = self.pointer and self._inside(*self.pointer, box)
+            fill = "#253a33" if not enabled else "#4b6351" if accent or hovered else "#304840"
+            c.create_rectangle(*box, fill=fill, outline="#637b64" if enabled else "#3d5145", tags=tag)
+            label((x1+x2)/2, (y1+y2)/2, text, "#efdcac" if enabled else "#798d7e")
+            if enabled:
+                self.panel_hits.append((box, action))
+        label(x+12, 43, "橘子的小日子" if w >= 320 else "橘子", "#efdcac", anchor="w")
         brain, state = self.brain.snapshot(), self.state.snapshot()
+        button(x+w-159, 34, x+w-113, 53, "近况" if self.show_journal else "小记", "journal")
         button(x+w-108, 35, x+w-33, 52, "暂停思考" if brain["enabled"] else "开启思考", "toggle")
         button(x+w-26, 35, x+w-7, 52, "×", "close")
-        status = (brain["error"] or (brain["status"] if brain["busy"] or not brain["enabled"]
-                                    or not brain["calls_remaining"] else self.message or brain["status"]))
-        if not self.live:
-            status = "场景预览 · 未连接模型"
-        status = status[:max(16, int((w-24)/11))]
+        status = self.status_text(brain)
+        status_width = w-74 if self.requested_action else w-24
+        status_limit = max(12, int(status_width/11))
+        status = status if len(status) <= status_limit else status[:status_limit-1]+"…"
         label(x+12, 63, status, "#dfb98d" if brain["error"] else "#a7c4a8", anchor="w")
-        for i, (key, title, color) in enumerate((("fullness", "饱腹", "#d9b980"), ("water", "饮水", "#8ebecb"),
-                                               ("energy", "精力", "#aec38b"), ("affection", "亲近", "#d9a99a"))):
-            bx, by = x+12+(i%2)*(w-24)/2, 79+(i//2)*20
-            bar = max(28, (w-24)/2-79)
-            label(bx, by, title, anchor="w")
-            c.create_rectangle(bx+33, by-3, bx+33+bar, by+3, fill="#152822", outline="", tags=tag)
-            c.create_rectangle(bx+33, by-3, bx+33+bar*state[key]/100, by+3, fill=color, outline="", tags=tag)
-            label(bx+39+bar, by, str(round(state[key])), color, anchor="w")
-        thought = brain["last_thought"] or "还没有模型心愿，等橘子想一想。"
-        thought_limit = 2*max(16, int((w-24)/11))-4
-        thought = thought if len(thought) <= thought_limit else thought[:thought_limit-1]+"…"
-        label(x+12, 112, "「"+thought+"」", "#eee1bb", anchor="nw", width=w-24, justify="left")
-        journal = state["journal"]
-        index = self.journal_index % len(journal) if journal else 0
-        recent = f"小记 {index+1}/{len(journal)} › "+journal[index]["text"] if journal else "还没有完成的照料记录"
-        self.panel_hits.append(((x+8, 141, x+w-8, 158), "journal"))
-        max_chars = max(16, int((w-24)/11))
-        label(x+12, 150, recent[:max_chars], "#a5b8a6", anchor="w")
-        label(x+12, 163, f"Kimi · {brain['model']}  |  本小时还可决定 {brain['calls_remaining']}/6 次", "#87a599", anchor="w")
+        if self.requested_action:
+            button(x+w-52, 56, x+w-9, 71, "取消", "cancel")
+        if self.show_journal:
+            journal = state["journal"]
+            pages = max(1, math.ceil(len(journal)/3))
+            self.journal_page = min(self.journal_page, pages-1)
+            for i, entry in enumerate(journal[self.journal_page*3:self.journal_page*3+3]):
+                by = 78+i*26
+                label(x+12, by, self._time_ago(entry["at"]), "#8aa997", anchor="w")
+                label(x+12, by+13, entry["text"][:max(16, int((w-24)/11))], "#e3d8b9", anchor="w")
+            if not journal:
+                label(x+w/2, 109, "还没有照料小记", "#e3d8b9")
+                label(x+w/2, 129, "伙伴完成照顾后，会记在这里。")
+            label(x+12, 157, f"最近 {len(journal)} 次照料 · {self.journal_page+1}/{pages}", "#87a599", anchor="w")
+            button(x+w-62, 149, x+w-39, 164, "‹", "previous", enabled=self.journal_page > 0)
+            button(x+w-34, 149, x+w-11, 164, "›", "next", enabled=self.journal_page < pages-1)
+        else:
+            for i, (key, title, color) in enumerate((("fullness", "饱腹", "#d9b980"), ("water", "饮水", "#8ebecb"),
+                                                   ("energy", "精力", "#aec38b"), ("affection", "亲近", "#d9a99a"))):
+                bx, by = x+12+(i%2)*(w-24)/2, 80+(i//2)*19
+                bar = max(28, (w-24)/2-79)
+                label(bx, by, title, anchor="w")
+                c.create_rectangle(bx+33, by-3, bx+33+bar, by+3, fill="#152822", outline="", tags=tag)
+                c.create_rectangle(bx+33, by-3, bx+33+bar*state[key]/100, by+3, fill=color, outline="", tags=tag)
+                label(bx+39+bar, by, str(round(state[key])), color, anchor="w")
+            thought = brain["last_thought"] or "还没有新的心愿，等橘子想一想。"
+            thought_limit = 2*max(16, int((w-24)/11))-4
+            thought = thought if len(thought) <= thought_limit else thought[:thought_limit-1]+"…"
+            last = brain["last_decision"]
+            caption = ("此刻的小心思" if self.plan else "上次的小心思") if last else "小心思"
+            if last:
+                caption += " · "+self._time_ago(last["decided_at"])
+            label(x+12, 115, caption, "#87a599", anchor="w")
+            label(x+12, 124, "「"+thought+"」", "#eee1bb", anchor="nw", width=w-24, justify="left")
+            label(x+12, 158, f"Kimi 决策 · 本小时已用 {brain.get('used_last_hour', 6-brain['calls_remaining'])}/6 次", "#87a599", anchor="w")
         bw = (w-24)/4
+        available = self.live and brain["enabled"] and not brain["busy"] and not (self.plan and self.plan["action"] in CARE)
         for i, (action, title) in enumerate(CARE.items()):
             bx = x+12+i*bw
-            button(bx, 174, bx+bw-5, 190, title, action)
+            button(bx, 169, bx+bw-5, 191, title, action, enabled=available,
+                   accent=self.requested_action == action)
 
     def panel_click(self, x, y):
         if not self.selected or not self._inside(x, y, getattr(self, "panel_bounds", (0, 0, 0, 0))):
@@ -341,10 +409,15 @@ class PetLayer:
                 elif action == "toggle":
                     self.toggle()
                 elif action == "journal":
-                    journal = self.state.snapshot()["journal"]
-                    if journal:
-                        self.journal_index = (self.journal_index+1) % len(journal)
-                        self.message = journal[self.journal_index]["text"]
+                    self.show_journal = not self.show_journal
+                    self.journal_page = 0
+                elif action == "previous":
+                    self.journal_page = max(0, self.journal_page-1)
+                elif action == "next":
+                    self.journal_page += 1
+                elif action == "cancel":
+                    self.requested_action = None
+                    self.message = "已取消排队的照护"
                 else:
                     self.request_care(action)
                 break

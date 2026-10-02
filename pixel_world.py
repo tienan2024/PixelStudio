@@ -31,6 +31,7 @@ class PixelWorld(tk.Canvas):
         self.frame, self.hovered, self.selected_object = -1, None, None
         self.animation_epoch = time.monotonic()
         self.camera_animation, self.return_camera_at = None, 0.0
+        self.manual_camera_until, self.meeting_camera_owned = 0.0, False
         self.tabs = []
         self.images = SceneAssets(self)
         specs = [obj for room in self.rooms for obj in room.objects]
@@ -52,10 +53,11 @@ class PixelWorld(tk.Canvas):
         self.bind("<Configure>", lambda _e: self._center_view())
         self.bind("<Button-1>", self._click)
         self.bind("<Motion>", self._motion)
-        self.bind("<Leave>", lambda _e: self._hover(None))
+        self.bind("<Leave>", self._leave)
         self.bind("<Return>", self._enter)
         self.bind("<Left>", lambda _e: self._step_room(-1))
         self.bind("<Right>", lambda _e: self._step_room(1))
+        self.bind("p", lambda _e: self.focus_pet())
         self.bind("<MouseWheel>", self._wheel)
         for i, room in enumerate(self.rooms, 1):
             self.bind(str(i), lambda _e, key=room.id: self.select_room(key))
@@ -102,8 +104,9 @@ class PixelWorld(tk.Canvas):
             if not was_active:
                 self.meeting_started = time.monotonic()
                 self.return_camera_at = 0.0
-                if self.expanded:
-                    self.select_room("meeting", animated=True)
+                if self.expanded and not self.pet.selected and time.monotonic() >= self.manual_camera_until:
+                    self.select_room("meeting", animated=True, automatic=True)
+                    self.meeting_camera_owned = True
         elif (codex.get("phase") == "working" and
               key != previous_key and bool(key[1])):
             self.meeting_until = 0.0
@@ -115,7 +118,7 @@ class PixelWorld(tk.Canvas):
         was_seated = any(a.get("meeting") for a in self.members.actors.values())
         meeting = self.meeting_active
         self.members.set_companions(self.companions, meeting=meeting)
-        if was_seated and not meeting and self.room_id == "meeting":
+        if was_seated and not meeting and self.room_id == "meeting" and self.meeting_camera_owned:
             self.return_camera_at = time.monotonic()+1.3
 
     def advance(self):
@@ -127,8 +130,9 @@ class PixelWorld(tk.Canvas):
         self.pet.advance(self.companions, self.meeting_active)
         if self.return_camera_at and now >= self.return_camera_at:
             self.return_camera_at = 0.0
-            if self.room_id == "meeting":
-                self.select_room("studio", animated=True)
+            if self.room_id == "meeting" and self.meeting_camera_owned and not self.pet.selected:
+                self.select_room("studio", animated=True, automatic=True)
+            self.meeting_camera_owned = False
         if self.camera_animation:
             started, origin, target = self.camera_animation
             progress = min(1, (now-started)/.8)
@@ -171,9 +175,33 @@ class PixelWorld(tk.Canvas):
         self.xview_moveto(left/self.map_width)
         self._overlay()
 
-    def select_room(self, key, *, animated=True):
+    def _hold_camera(self):
+        self.manual_camera_until = time.monotonic()+45
+        self.meeting_camera_owned = False
+        self.return_camera_at = 0.0
+        self.camera_animation = None
+
+    def focus_pet(self):
+        self.select_room(self.pet.room_id, animated=True)
+        self.pet.selected, self.pet.show_journal = True, False
+        self.focus_set()
+        self._live()
+        return "break"
+
+    def dismiss_pet(self):
+        if not self.pet.selected:
+            return False
+        self.pet.selected = False
+        self.pet.pointer = self.pet_hover = None
+        self._hold_camera()
+        self._live()
+        return True
+
+    def select_room(self, key, *, animated=True, automatic=False):
         room = next((room for room in self.rooms if room.id == key), None)
         if room:
+            if not automatic:
+                self._hold_camera()
             self.room_id = key
             if animated and self.expanded:
                 origin = self.canvasx(0)+self.view_width/2
@@ -195,6 +223,7 @@ class PixelWorld(tk.Canvas):
 
     def _wheel(self, event):
         if self.expanded and event.delta:
+            self._hold_camera()
             self.camera_animation = None
             left = self.canvasx(0) + (-96 if event.delta > 0 else 96)
             left = max(0, min(left, self.map_width-self.view_width))
@@ -205,7 +234,9 @@ class PixelWorld(tk.Canvas):
         return "break"
 
     def _enter(self, _event):
-        if self.expanded and self.selected_object:
+        if self.expanded and self.pet.selected:
+            return "break"
+        elif self.expanded and self.selected_object:
             self._activate_object(self.selected_object)
             self._live()
         elif self.on_toggle:
@@ -251,8 +282,7 @@ class PixelWorld(tk.Canvas):
         if self.pet_hover:
             info = self.pet.describe(self.pet_hover)
         elif self.pet.selected:
-            brain = self.pet.brain.snapshot()
-            info = brain["error"] or self.pet.message or brain["last_thought"] or "点击粮碗、水碗或毛线球，请模型安排照顾橘子"
+            info = self.pet.status_text()
         elif target:
             info = self.state.describe(target)
             if self.hovered:
@@ -291,6 +321,7 @@ class PixelWorld(tk.Canvas):
         return next((obj.id for obj in reversed(self.objects) if obj.hit(x, y)), None)
 
     def _motion(self, event):
+        self.pet.pointer = (self.canvasx(event.x), event.y) if self.expanded else None
         self.pet_hover = self.pet.hit(self.canvasx(event.x), event.y) if self.expanded else None
         if not self.expanded or not (16 < event.x < self.view_width-16 and 24 < event.y < 200):
             self._hover(None)
@@ -308,6 +339,11 @@ class PixelWorld(tk.Canvas):
             self._highlight()
             self._overlay()
 
+    def _leave(self, _event):
+        self.pet.pointer = self.pet_hover = None
+        self._hover(None)
+        self._overlay()
+
     def _highlight(self):
         self.delete("hover")
         key = self.hovered or self.selected_object
@@ -321,14 +357,13 @@ class PixelWorld(tk.Canvas):
                 self.on_toggle()
             return
         x, y = self.canvasx(event.x), event.y
+        self._hold_camera()
         if self.pet.panel_click(x, y):
             self._live()
             return
         if y <= 24:
             if self.pet_tab and self.pet._inside(x, y, self.pet_tab):
-                self.select_room(self.pet.room_id, animated=True)
-                self.pet.selected = True
-                self._live()
+                self.focus_pet()
                 return
             for x1, x2, room_id in self.tabs:
                 if x1 <= x <= x2:
