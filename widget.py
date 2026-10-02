@@ -230,20 +230,6 @@ def window_caption(window: dict | None, fallback: str) -> str:
     return f"{minutes:g} 分钟"
 
 
-def rel_time(ts: float) -> str:
-    """把秒/毫秒时间戳转成口语化的相对时间。"""
-    if ts > 1e12:
-        ts /= 1000
-    delta = max(0, time.time() - ts)
-    if delta < 60:
-        return "刚刚活跃"
-    if delta < 3600:
-        return f"{int(delta // 60)} 分钟前活跃"
-    if delta < 86400:
-        return f"{int(delta // 3600)} 小时前活跃"
-    return f"{int(delta // 86400)} 天前活跃"
-
-
 def fmt_duration(seconds: int) -> str:
     """把秒数转成口语化时长。"""
     minutes = int(seconds) // 60
@@ -271,44 +257,8 @@ def save_team_stats(stats: dict) -> None:
         pass
 
 
-# ---------------------------------------------------------------------------
-# 像素小动画（灵感来自 Star-Office-UI：状态驱动动画，AI 干什么就演什么）
-# ---------------------------------------------------------------------------
-
-DOC = (
-    "............",
-    "..KKKKKKKK..",
-    ".KDDDDDDDDK.",
-    ".KDLLLLDDDK.",
-    ".KDDDDDDDDK.",
-    ".KDLLLLLLDK.",
-    ".KDDDDDDDDK.",
-    ".KDLLLDDDDK.",
-    ".KDDDDDDDDK.",
-    ".KDDDDDDDDK.",
-    "..KKKKKKKK..",
-    "............",
-)
-
-
-def doc_frames(lines: int) -> tuple:
-    """只有前 lines 行有文字的文档帧。"""
-    grid = list(DOC)
-    for i, r in enumerate((3, 5, 7)):
-        if i >= lines:
-            grid[r] = ".KDDDDDDDDK."
-    return tuple(grid)
-
-
-def task_frames(state: str) -> list:
-    """任务状态 → 文档图标帧序列。"""
-    if state == "active":  # 进行中：文字逐行打出
-        return [(doc_frames(1), 0, 0, ""), (doc_frames(2), 0, 0, ""), (DOC, 0, 0, "")]
-    return [(DOC, 0, 0, "")]
-
-
 class PixelSprite(tk.Canvas):
-    """Grid task icons and shared animated character portraits."""
+    """Shared animated companion portraits with a grid fallback."""
 
     SCALE = 3
     TOP = 12  # 头顶动画区高度
@@ -489,9 +439,6 @@ class Widget:
             pass
         self.pinned = bool(prefs.get("pinned", True))
         self.collapsed = bool(prefs.get("collapsed", False))
-        self.tasks_collapsed = prefs.get("tasks_collapsed", True)
-        if not isinstance(self.tasks_collapsed, bool):
-            self.tasks_collapsed = True
         self.root.attributes("-topmost", self.pinned)
         self.root.attributes("-alpha", 0.97)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -608,13 +555,12 @@ class Widget:
         """卡片心跳与状态过期处理，独立于画卷动画。"""
         if self.closing:
             return
-        for rows in (self.task_rows, self.agent_rows):
-            for row in rows:
-                row[1].advance()
+        for row in self.agent_rows:
+            row[1].advance()
         now = time.monotonic()
         if not self.data_expired and now-self.last_data_sample > 60:
             self._invalidate_data()
-            self.status.configure(text="额度与任务状态已过期 · 将自动重试")
+            self.status.configure(text="额度数据已过期 · 将自动重试")
         if now-self.last_companion_sample > 15:
             self.last_companion_sample = now
             self._render_companions(None)
@@ -702,18 +648,8 @@ class Widget:
         self.details = tk.Frame(outer, bg=self.BG)
         if not self.collapsed:
             self.details.pack(fill="x", padx=12, pady=(8, 0))
-        tasks_header = tk.Frame(self.details, bg=self.BG)
-        tasks_header.pack(fill="x")
-        self.task_summary = self.label(tasks_header, "任务记录 · 0", bold=True, size=9)
-        self.task_summary.pack(side="left")
-        self.tasks_button = self.button(tasks_header, "展开" if self.tasks_collapsed else "收起",
-                                        self.toggle_history)
-        self.tasks_body = tk.Frame(self.details, bg=self.BG)
-        if not self.tasks_collapsed:
-            self.tasks_body.pack(fill="x")
-        self.task_rows = [self._member_card(self.tasks_body) for _ in range(3)]
         team_header = tk.Frame(self.details, bg=self.BG)
-        team_header.pack(fill="x", pady=(9, 0))
+        team_header.pack(fill="x")
         self.agent_summary = self.label(team_header, "像素工作室", bold=True, size=9)
         self.agent_summary.pack(side="left")
         self.world_button = self.button(team_header, "展开画卷", self.toggle_world)
@@ -943,16 +879,6 @@ class Widget:
         self._save_after_layout = True
         self.resize()
 
-    def toggle_history(self):
-        self.tasks_collapsed = not self.tasks_collapsed
-        self.tasks_button.configure(text="展开" if self.tasks_collapsed else "收起")
-        if self.tasks_collapsed:
-            self.tasks_body.pack_forget()
-        else:
-            self.tasks_body.pack(fill="x", after=self.tasks_button.master)
-        self._save_after_layout = True
-        self.resize()
-
     def toggle_pin(self):
         self.pinned = not self.pinned
         self.root.attributes("-topmost", self.pinned)
@@ -970,7 +896,6 @@ class Widget:
             PREFERENCES.write_text(json.dumps({
                 "x": x, "y": y,
                 "pinned": self.pinned, "collapsed": self.collapsed,
-                "tasks_collapsed": self.tasks_collapsed,
                 "snapped": sorted(self.snapped),
                 "screen": [sw, sh],
                 "x_ratio": x / max(1, sw - w),
@@ -1117,10 +1042,8 @@ class Widget:
         threads = data.get("threads", [])
         agents = [t for t in threads if is_agent(t)]
         tasks = [t for t in threads if not is_agent(t)]
-        self.task_summary.configure(text=f"任务记录 · {len(tasks)}")
-        self._render_tasks(tasks, data)
         has_error = data.get("limits_error") or data.get("threads_error") or data.get("kimi_error")
-        self.status.configure(text="部分额度/列表不可用" if has_error else f"{time.strftime('%H:%M:%S')} · 额度20秒 / 伙伴2秒")
+        self.status.configure(text="部分数据暂不可用" if has_error else f"{time.strftime('%H:%M:%S')} · 额度20秒 / 伙伴2秒")
         if not data.get("threads_error"):
             self._sample_team_stats(tasks, agents)
         else:
@@ -1165,43 +1088,6 @@ class Widget:
                     f"{max(rec.get('peak', 0), len(rec.get('agents', [])))} 名成员上岗 · "
                     f"忙碌 {fmt_duration(rec.get('busy', 0))}")
         return "小记 · 团队还没有留下今天的足迹"
-
-    def _render_tasks(self, tasks: list, data: dict) -> None:
-        """任务卡片：像素文档图标，进行中时文字逐行打出。"""
-        status_map = {
-            "active": ("进行中", self.ACCENT),
-            "idle": ("空闲", self.MUTED),
-            "notLoaded": ("未加载", self.MUTED),
-            "systemError": ("异常", "#efad83"),
-        }
-        tasks = sorted(tasks, key=lambda t: ((t.get("status") or {}).get("type") == "active",
-                                             t.get("recencyAt") or t.get("updatedAt") or 0), reverse=True)
-        for i, (card, sprite, name, status, sub) in enumerate(self.task_rows):
-            if i >= len(tasks):
-                if i == 0:
-                    card.pack(fill="x", pady=(4, 0))
-                    sprite.set_animation(task_frames(""), {"K": "#0d0f12", "D": "#6b7280", "L": "#4a5160"})
-                    name.configure(text="状态读取失败" if data.get("threads_error") else "暂无任务记录", fg=self.MUTED)
-                    status.configure(text="")
-                    sub.configure(text="")
-                else:
-                    card.pack_forget()
-                continue
-            card.pack(fill="x", pady=(4, 0))
-            thread = tasks[i]
-            state = (thread.get("status") or {}).get("type", "unknown")
-            state_text, color = status_map.get(state, ("未知", self.MUTED))
-            nm = thread.get("agentNickname") or thread.get("name") or thread.get("agentRole") or "未命名任务"
-            nm = " ".join(str(nm).split())
-            if len(nm) > 14:
-                nm = nm[:13] + "…"
-            name.configure(text=nm, fg=self.TEXT)
-            status.configure(text=state_text, fg=color)
-            sprite.set_animation(task_frames(state),
-                                 {"K": "#0d0f12", "D": "#c8cdd5",
-                                  "L": self.ACCENT if state == "active" else "#5a6270"})
-            ts = thread.get("recencyAt") or thread.get("updatedAt")
-            sub.configure(text=rel_time(ts) if isinstance(ts, (int, float)) and ts > 0 else " ")
 
     def _render_companions(self, partners):
         """Two stable mascots show observed task / request state, never old agent IDs."""
