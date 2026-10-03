@@ -13,6 +13,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from task_records import build_task_records
+
 _FRESH_MS = 15 * 60 * 1000      # Codex 活动新鲜度窗口
 _KIMI_STALE_S = 15              # 网关 observed_at 过期窗口
 _KIMI_FAIL_S = 60               # 最近失败计入 systemError 的窗口
@@ -65,6 +67,21 @@ class CompanionMonitor:
 
     def snapshot(self, threads):
         return [self._codex_entry(threads), self._kimi_entry()]
+
+    def snapshot_with_tasks(self, threads):
+        """Share one metadata read between the mascot and the task overview."""
+        try:
+            records = self._read_codex_threads()
+        except Exception:
+            records = None
+        try:
+            codex = (self._codex_entry_from_records(records) if records is not None
+                     else self._codex_entry_from_threads(threads))
+        except Exception:
+            codex = self._entry("companion:codex", "Codex", "unknown", "状态未知",
+                                task="任务源暂不可用")
+        return {"companions": [codex, self._kimi_entry()],
+                "tasks": build_task_records(records, threads)}
 
     def _entry(self, companion_id, name, status, status_text, task="", detail="",
                model="", activity_count=0, phase="unknown",
@@ -120,19 +137,23 @@ class CompanionMonitor:
                         if match and int(match.group(1)) > best_num:
                             best_num, best = int(match.group(1)), entry.path
             except OSError:
-                return []
+                return None
             paths[key] = best
         if not paths["state"] or not paths["history"]:
-            return []
+            return None
         conns = []
         try:
             for path in (paths["state"], paths["history"]):
                 uri = "file:%s?mode=ro" % urllib.parse.quote(path.replace("\\", "/"), safe="/:")
                 conns.append(sqlite3.connect(uri, uri=True, timeout=1))
+            columns = {r[1] for r in conns[0].execute("PRAGMA table_info(threads)")}
+            cwd_column = "cwd" if "cwd" in columns else "'' AS cwd"
+            archived_clause = " AND COALESCE(archived, 0) = 0" if "archived" in columns else ""
             rows = conns[0].execute(
                 "SELECT id, name, title, agent_path, source, updated_at_ms, recency_at_ms,"
-                " model FROM threads WHERE COALESCE(agent_path, '') IN ('', '/root')"
+                " model, " + cwd_column + " FROM threads WHERE COALESCE(agent_path, '') IN ('', '/root')"
                 " AND COALESCE(source, '') NOT LIKE '%subAgent%'"
+                + archived_clause +
                 " ORDER BY COALESCE(updated_at_ms, 0) DESC LIMIT 32").fetchall()
             records = [r for r in (self._codex_thread_record(conns[1], row) for row in rows) if r]
             records.sort(key=lambda r: r["recency"] or r["updated"] or 0, reverse=True)
@@ -143,13 +164,13 @@ class CompanionMonitor:
 
     @staticmethod
     def _codex_thread_record(history, row):
-        tid, name, title, agent_path, source, updated, recency, model = row
+        tid, name, title, agent_path, source, updated, recency, model, cwd = row
         if isinstance(source, str) and "subAgent" in source:
             return None
         agent_path = (agent_path or "").strip()
         if agent_path and agent_path != "/root":
             return None
-        turn_id, turn_status, completed_at, final_item = "", None, 0, None
+        turn_id, turn_status, started_at, completed_at, final_item = "", None, 0, 0, None
         if tid:
             found = history.execute(
                 "SELECT turn_id, status, started_at, completed_at, final_agent_item_id"
@@ -157,6 +178,7 @@ class CompanionMonitor:
                 " ORDER BY rollout_ordinal DESC LIMIT 1", (tid,)).fetchone()
             if found:
                 turn_id, turn_status = found[0] or "", found[1]
+                started_at = _num(found[2])
                 completed_at = _num(found[3])
                 final_item = found[4]
         item_ms, final_phase = 0, False
@@ -174,6 +196,7 @@ class CompanionMonitor:
         updated = _num(updated); recency = _num(recency) or updated
         return {"id": tid or "", "name": name or title or "未命名任务", "model": model or "",
                 "updated": updated, "recency": recency, "turn_id": turn_id,
+                "cwd": cwd or "", "started_at": started_at,
                 "status": turn_status, "completed_at": completed_at,
                 "final_item": final_item or final_phase, "freshness": max(updated, item_ms)}
 

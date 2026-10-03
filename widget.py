@@ -22,6 +22,7 @@ from pixel_world import PixelWorld
 from widget_instance import WidgetInstance
 from character_sprites import character_bank, draw_fallback, member_key
 from companion_sources import CompanionMonitor
+from task_board import TaskBoard
 
 
 HOME = Path.home()
@@ -439,6 +440,10 @@ class Widget:
             pass
         self.pinned = bool(prefs.get("pinned", True))
         self.collapsed = bool(prefs.get("collapsed", False))
+        self.tasks_collapsed = prefs.get("tasks_collapsed", True)
+        if not isinstance(self.tasks_collapsed, bool):
+            self.tasks_collapsed = True
+        self.task_filter = prefs.get("task_filter")
         self.root.attributes("-topmost", self.pinned)
         self.root.attributes("-alpha", 0.97)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -564,6 +569,7 @@ class Widget:
         if now-self.last_companion_sample > 15:
             self.last_companion_sample = now
             self._render_companions(None)
+            self.task_board.set_snapshot(None)
         self.root.after(280, self._tick)
 
     def _scene_tick(self):
@@ -664,6 +670,12 @@ class Widget:
         self.memo = self.label(self.details, "小记 · 等待读取", fg=self.MUTED, size=8, wraplength=282)
         self.memo.pack(fill="x", pady=(4, 0))
         self.agent_rows = [self._member_card(self.details) for _ in range(2)]
+        self.task_board = TaskBoard(self.details, card_factory=RoundedCard,
+                                    palette={"bg": self.BG, "card": self.CARD, "text": self.TEXT,
+                                             "muted": self.MUTED, "accent": self.ACCENT},
+                                    on_resize=self.resize, on_preference=self._task_preference,
+                                    collapsed=self.tasks_collapsed, selected_filter=self.task_filter)
+        self.task_board.pack(fill="x", pady=(8, 0))
 
         self.footer = tk.Frame(outer, bg=self.BG)
         self.footer.pack(fill="x", padx=12, pady=(8, 8))
@@ -786,6 +798,9 @@ class Widget:
         if self.closing:
             return
         self.chrome._fit_height()
+        if not self.collapsed and self.task_board.fit_height(
+                int(self.chrome.cget("height")), self.root.winfo_screenheight()-self.TASKBAR):
+            return
         self.panel_height = int(self.chrome.cget("height"))
         if "bottom" in self.snapped:
             self.panel_y = max(0, self.root.winfo_screenheight()-self.panel_height-self.TASKBAR)
@@ -885,6 +900,10 @@ class Widget:
         self.pin_button.configure(text="已置顶" if self.pinned else "置顶")
         self.save()
 
+    def _task_preference(self):
+        self._save_after_layout = True
+        self.resize()
+
     def save(self):
         try:
             sw = self.root.winfo_screenwidth()
@@ -896,6 +915,8 @@ class Widget:
             PREFERENCES.write_text(json.dumps({
                 "x": x, "y": y,
                 "pinned": self.pinned, "collapsed": self.collapsed,
+                "tasks_collapsed": self.task_board.collapsed,
+                "task_filter": self.task_board.selected_filter,
                 "snapped": sorted(self.snapped),
                 "screen": [sw, sh],
                 "x_ratio": x / max(1, sw - w),
@@ -936,10 +957,10 @@ class Widget:
                    if self.last_thread_sample and time.monotonic()-self.last_thread_sample <= 60 else [])
         def fetch():
             try:
-                partners = self.companion_monitor.snapshot(threads)
+                snapshot = self.companion_monitor.snapshot_with_tasks(threads)
             except Exception:
-                partners = None
-            self.events.put(("companions", partners))
+                snapshot = {"companions": None, "tasks": None}
+            self.events.put(("companions", snapshot))
         threading.Thread(target=fetch, daemon=True).start()
 
     def _drain(self) -> None:
@@ -951,7 +972,8 @@ class Widget:
                 if kind == "companions":
                     self.companion_busy = False
                     self.last_companion_sample = time.monotonic()
-                    self._render_companions(value)
+                    self._render_companions(value.get("companions"))
+                    self.task_board.set_snapshot(value.get("tasks"))
                     self.companion_timer = self.root.after(2000, self.refresh_companions)
                     continue
                 self.busy = False
@@ -1122,6 +1144,7 @@ class Widget:
         if self.companion_timer is not None:
             self.root.after_cancel(self.companion_timer)
         self.save()
+        self.task_board.close()
         self.world_view.close()
         self.close_world(immediate=True)
         if self.layout_timer is not None:
