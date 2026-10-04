@@ -108,7 +108,7 @@ def _endpoint():
     return raw.rstrip("/") + "/v1/responses"
 
 
-def _response(raw):
+def _response(raw, validator=_decision):
     text = raw.decode("utf-8")
     if text.lstrip().startswith("{"):
         response = json.loads(text)
@@ -143,7 +143,7 @@ def _response(raw):
         output = "".join(texts)
     output = output.strip()
     fence = re.fullmatch(r"```(?:json)?\s*\n?(.*?)\n?```", output, re.DOTALL | re.IGNORECASE)
-    return _decision(json.loads(fence.group(1) if fence else output))
+    return validator(json.loads(fence.group(1) if fence else output))
 
 
 class PetBrain:

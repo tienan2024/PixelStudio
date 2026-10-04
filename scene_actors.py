@@ -20,6 +20,7 @@ class ActorLayer:
         self.selected = None
         self.meeting, self.discussion_started = False, 0.0
         self.care = None
+        self.life = {}
         self.last_tick = time.monotonic()
 
     def set_companions(self, threads, *, meeting=False):
@@ -42,8 +43,14 @@ class ActorLayer:
             home_destination = (home.x+(210, 366)[index], 190)
             room = self.rooms["meeting"] if meeting else home
             caring = self.care is not None and self.care["key"] == key
+            life = self.life.get(key)
+            if life and (meeting or caring or state != "idle" or now >= life["expires"]):
+                self.life.pop(key, None)
+                life = None
+            if life:
+                room = self.rooms[life["room"]]
             tx, ty = ((room.x+(227, 337)[index], 140) if meeting else
-                      self.care["destination"] if caring else home_destination)
+                      self.care["destination"] if caring else life["destination"] if life else home_destination)
             actor = self.actors.get(key)
             if actor is None:
                 actor = dict(x=home.x+(210, 366)[index], y=190, path=[], facing=1,
@@ -51,7 +58,7 @@ class ActorLayer:
                              rise_until=0.0, settle_started=0.0, care_started=0.0)
             if actor.get("destination") != (tx, ty):
                 kind = ("arriving" if meeting else "pet-care" if caring else
-                        "returning" if actor.get("meeting") else "relocating")
+                        "returning" if actor.get("meeting") else "life" if life else "relocating")
                 self._route(actor, tx, ty, kind)
                 actor["next_wander"] = now+10+index*4
             if not caring:
@@ -75,10 +82,46 @@ class ActorLayer:
         if self.care is not None:
             self.end_care()
         actor = self.actors[key]
+        self.life.pop(key, None)
         self.care = dict(key=key, destination=(x, y), action=action)
-        actor.update(destination=(x, y), care_started=0.0)
+        actor.update(destination=(x, y), care_started=0.0, dialogue_until=0.)
         self._route(actor, x, y, "pet-care")
         return True
+
+    def begin_life(self, key, x, y, room, action, *, lifetime=180):
+        """Apply a bounded scene plan only to a confirmed idle companion."""
+        actor = self.actors.get(key)
+        if (not actor or actor["state"] != "idle" or self.meeting or room not in self.rooms
+                or (self.care and self.care["key"] == key)):
+            return False
+        if action not in {"stay", "read", "coffee", "water_plant", "rest", "chat", "stretch"}:
+            return False
+        self.life[key] = dict(destination=(x, y), room=room, action=action,
+                              expires=time.monotonic()+min(180, max(1, lifetime)))
+        actor.update(destination=(x, y), room=room, next_wander=time.monotonic()+200)
+        self._route(actor, x, y, "life")
+        return True
+
+    def end_life(self, key):
+        if self.life.pop(key, None) is None:
+            return
+        actor = self.actors.get(key)
+        if actor and not self.meeting and not (self.care and self.care["key"] == key):
+            tx, ty = actor["home_destination"]
+            actor["destination"] = (tx, ty)
+            self._route(actor, tx, ty, "relocating")
+
+    def life_ready(self, key):
+        actor, plan = self.actors.get(key), self.life.get(key)
+        return bool(actor and plan and not actor["path"] and actor["state"] == "idle"
+                    and not self.meeting and time.monotonic() < plan["expires"]
+                    and math.hypot(actor["x"]-plan["destination"][0],
+                                   actor["y"]-plan["destination"][1]) < .5)
+
+    def say(self, key, text, *, duration=6):
+        actor = self.actors.get(key)
+        if actor and actor["state"] == "idle" and not self.meeting:
+            actor["dialogue"], actor["dialogue_until"] = text, time.monotonic()+duration
 
     def end_care(self) -> None:
         """Return to the latest real home, which may have changed during care."""
@@ -131,8 +174,13 @@ class ActorLayer:
             was_seated = actor.get("seated", False)
             path = actor["path"]
             caring = self.care is not None and self.care["key"] == actor["id"]
+            life = self.life.get(actor["id"])
+            if life and (now >= life["expires"] or actor["state"] != "idle" or self.meeting or caring):
+                self.end_life(actor["id"])
+                life = None
+                path = actor["path"]
             if (not path and actor["state"] == "idle" and not actor["meeting"]
-                    and not caring and now >= actor["next_wander"]):
+                    and not caring and not life and now >= actor["next_wander"]):
                 actor["wander_step"] += 1
                 home_x, home_y = actor["destination"]
                 offset = (0, 22, 0, -18)[actor["wander_step"] % 4]
@@ -154,10 +202,10 @@ class ActorLayer:
                     actor["x"], actor["y"] = x, y
                     path.pop(0)
             actor["moving"] = bool(path)
-            actor["seated"] = actor["meeting"] and not path
+            actor["seated"] = (actor["meeting"] or bool(life and life["action"] == "rest")) and not path
             if actor["seated"] and not was_seated:
                 actor["settle_started"] = now
-            if actor["seated"]:
+            if actor["seated"] and actor["meeting"]:
                 actor["facing"] = 1 if actor["index"] == 0 else -1
             elif caring and not path:
                 actor["facing"] = 1
@@ -183,7 +231,9 @@ class ActorLayer:
         for key, a in sorted(self.actors.items(), key=lambda item: item[1]["y"]):
             x, y = round(a["x"]), round(a["y"])
             moving, seated = a.get("moving", False), a.get("seated", False)
-            speaking = a.get("speaking", False)
+            dialogue = (a.get("dialogue", "") if now < a.get("dialogue_until", 0)
+                        and a["state"] == "idle" and not a["meeting"] and not a.get("moving") else "")
+            speaking = a.get("speaking", False) or bool(dialogue)
             rising = now < a["rise_until"]
             caring = self.care is not None and self.care["key"] == key and not a["meeting"]
             caring_here = caring and not moving
@@ -210,6 +260,11 @@ class ActorLayer:
             a["bounds"] = (x+dx-width//2, y+dy-height, x+dx-width//2+width, y+dy)
             if caring_here:
                 self._draw_care(x+dx, y+dy, height, a, now, tag)
+            life = self.life.get(key)
+            if life and not moving and not caring:
+                self._draw_life(x+dx, y+dy, height, life["action"], now, tag)
+            if dialogue:
+                self._draw_dialogue(x, y-height, dialogue, tag)
             if now < a["react_until"]:
                 lift = int((now*6) % 2)
                 c.create_line(x+width//2+scaled(1), y-height+scaled(12),
@@ -228,6 +283,10 @@ class ActorLayer:
                 activity = ("入座中" if moving and y < 185 else "前往会议室") if moving else ("交流中" if speaking else "听取总结")
             elif caring:
                 activity = CARE_LABELS[self.care["action"]] if moving else "正在照顾橘子"
+            elif life:
+                activity = "走去" if moving else "正在"
+                activity += {"stay": "安静待着", "read": "看书", "coffee": "喝咖啡", "water_plant": "照顾绿植",
+                             "rest": "休息", "chat": "聊天", "stretch": "伸展"}[life["action"]]
             elif moving:
                 activity = "散会返回" if a.get("route_kind") == "returning" else "散步" if a.get("route_kind") == "roaming" else "前往工位" if a["state"] == "active" else "移动中"
             else:
@@ -239,6 +298,44 @@ class ActorLayer:
                 c.create_rectangle(*a["label_bounds"], fill="#1c2b36", outline="#475758", tags=tag)
                 c.create_text(x, y-height-scaled(17), text=label[:18], fill=COLORS[a["state"]],
                               font=("Microsoft YaHei UI", scaled(7)), tags=tag)
+
+    def _draw_dialogue(self, x, top, text, tag):
+        c = self.canvas
+        width = min(164, max(72, 11*min(len(text), 14)+12))
+        text = text if len(text) <= 28 else text[:27]+"…"
+        y = max(26, top-39)
+        c.create_rectangle(x-width/2, y, x+width/2, y+32, fill="#eee2c6", outline="#b6a482", tags=tag)
+        c.create_polygon(x-3, y+32, x+4, y+32, x, y+36, fill="#eee2c6", outline="", tags=tag)
+        c.create_text(x, y+16, text=text, width=width-10, fill="#4a4e41",
+                      font=("Microsoft YaHei UI", 8), tags=tag)
+
+    def _draw_life(self, x, y, height, action, now, tag):
+        c, scale = self.canvas, self.characters.WORLD_SCALE
+        def rect(dx, dy, w, h, color):
+            c.create_rectangle(round(x+dx*scale), round(y+dy*scale),
+                               round(x+(dx+w)*scale), round(y+(dy+h)*scale),
+                               fill=color, outline="", tags=tag)
+        if action == "read":
+            rect(-9, -height/scale*.37, 18, 12, "#796749")
+            rect(-8, -height/scale*.37, 7, 10, "#e7d5a8")
+            rect(1, -height/scale*.37, 7, 10, "#e7d5a8")
+            rect(0, -height/scale*.37, 1, 12, "#aa8d62")
+        elif action == "coffee":
+            rect(7, -height/scale*.45, 7, 8, "#dfc7a3")
+            rect(14, -height/scale*.43, 3, 4, "#b19470")
+            for i in range(2):
+                rect(9+i*3, -height/scale*.47-2-int(now*2+i)%5, 1, 3, "#d9d4be")
+        elif action == "water_plant":
+            rect(9, -height/scale*.34, 8, 7, "#89aea0")
+            for i in range(3):
+                rect(18+i*3, -height/scale*.31+(int(now*9)+i*4)%12, 1, 2, "#87bac8")
+        elif action == "rest":
+            c.create_text(x+22*scale, y-height-2-int(now*2)%3, text="z", fill="#d5ddbf",
+                          font=("Consolas", 9), tags=tag)
+        elif action == "stretch":
+            for direction in (-1, 1):
+                c.create_line(x+direction*9*scale, y-height*.6, x+direction*20*scale,
+                              y-height*.82-math.sin(now*3)*2, fill="#dec4b0", width=round(3*scale), tags=tag)
 
     def _draw_care(self, x, y, height, actor, now, tag):
         """Small pixel reach and props share the actor's existing draw layer."""

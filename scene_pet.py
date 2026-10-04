@@ -171,6 +171,31 @@ class PetLayer:
             self.target = (self.rooms[decision["location"]].center+52, 190.)
             self.next_roam = now+20
 
+    def offer_care(self, caregiver, action, *, model, decided_at):
+        """Accept a companion-model intention, using the normal care executor."""
+        if (not isinstance(caregiver, str) or not isinstance(action, str)
+                or caregiver not in ("codex", "kimi") or action not in CARE):
+            return False
+        brain = self.brain.snapshot()
+        actor = self.members.actors.get("companion:"+caregiver)
+        if (not self.live
+                or self.members.meeting or not actor or actor["state"] != "idle"
+                or not brain["enabled"] or brain["busy"] or self.requested_action
+                or (self.plan and self.plan["action"] in CARE)):
+            return False
+        self._accept(dict(action=action, caregiver=caregiver, location="lounge",
+                          source="companion-model", model=model, decided_at=decided_at), time.monotonic())
+        # This intention is not a new thought from the cat's own model.
+        self.bubble_until = 0
+        self.message = f"{actor['name']} 想照顾橘子"
+        return True
+
+    def cancel_companion_care(self):
+        if self.plan and self.plan.get("source") == "companion-model":
+            self.members.end_care()
+            self.plan, self.target, self.stage, self.pose = None, None, "idle", "idle"
+            self.message = "伙伴已暂停这次自主照护"
+
     def _move(self, dt):
         if not self.target:
             return False
@@ -388,7 +413,8 @@ class PetLayer:
             thought_limit = 2*max(16, int((w-24)/11))-4
             thought = thought if len(thought) <= thought_limit else thought[:thought_limit-1]+"…"
             last = brain["last_decision"]
-            caption = ("此刻的小心思" if self.plan else "上次的小心思") if last else "小心思"
+            current_thought = self.plan and self.plan.get("source") != "companion-model"
+            caption = ("此刻的小心思" if current_thought else "上次的小心思") if last else "小心思"
             if last:
                 caption += " · "+self._time_ago(last["decided_at"])
             label(x+12, 115, caption, "#87a599", anchor="w")

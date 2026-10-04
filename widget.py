@@ -684,7 +684,7 @@ class Widget:
         self.refresh_button = self.button(self.footer, "↻", self.refresh)
 
     def _escape(self, _event=None):
-        if not self.world_view.dismiss_pet():
+        if not self.world_view.dismiss_panel():
             self.close_world()
         return "break"
 

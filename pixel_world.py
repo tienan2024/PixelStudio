@@ -13,6 +13,7 @@ from scene_objects import SceneObject
 from scene_state import SceneState
 from scene_meeting import MeetingEffects
 from scene_pet import PetLayer
+from scene_soul import SoulLayer
 
 
 class PixelWorld(SceneCanvas):
@@ -49,6 +50,7 @@ class PixelWorld(SceneCanvas):
         self.by_id = {obj.id: obj for obj in self.objects}
         self.members = ActorLayer(self, self.rooms, status_rooms)
         self.pet = PetLayer(self, self.rooms, self.images, self.members, live=pet_live)
+        self.soul = SoulLayer(self, live=pet_live)
         self.pet_hover = None
         self.meeting_effects = MeetingEffects(self, next(r for r in self.rooms if r.id == "meeting"))
         self.companions, self.last_codex = [], {}
@@ -109,7 +111,8 @@ class PixelWorld(SceneCanvas):
             if not was_active:
                 self.meeting_started = time.monotonic()
                 self.return_camera_at = 0.0
-                if self.expanded and not self.pet.selected and time.monotonic() >= self.manual_camera_until:
+                if (self.expanded and not self.pet.selected and self.soul.selected is None
+                        and time.monotonic() >= self.manual_camera_until):
                     self.select_room("meeting", animated=True, automatic=True)
                     self.meeting_camera_owned = True
         elif (codex.get("phase") == "working" and
@@ -133,9 +136,11 @@ class PixelWorld(SceneCanvas):
             self._sync_companions()
         self.members.advance()
         self.pet.advance(self.companions, self.meeting_active)
+        self.soul.advance(self.companions, self.meeting_active)
         if self.return_camera_at and now >= self.return_camera_at:
             self.return_camera_at = 0.0
-            if self.room_id == "meeting" and self.meeting_camera_owned and not self.pet.selected:
+            if (self.room_id == "meeting" and self.meeting_camera_owned and not self.pet.selected
+                    and self.soul.selected is None):
                 self.select_room("studio", animated=True, automatic=True)
             self.meeting_camera_owned = False
         if self.camera_animation:
@@ -237,6 +242,14 @@ class PixelWorld(SceneCanvas):
         self._live()
         return True
 
+    def dismiss_panel(self):
+        if self.soul.dismiss():
+            self.members.selected = None
+            self._hold_camera()
+            self._live()
+            return True
+        return self.dismiss_pet()
+
     def select_room(self, key, *, animated=True, automatic=False):
         room = next((room for room in self.rooms if room.id == key), None)
         if room:
@@ -252,6 +265,7 @@ class PixelWorld(SceneCanvas):
             self.hovered = self.selected_object = None
             self.members.selected = None
             self.pet.selected = False
+            self.soul.dismiss()
             self.pet_hover = None
             self._live()
         return "break"
@@ -273,7 +287,7 @@ class PixelWorld(SceneCanvas):
         return "break"
 
     def _enter(self, _event):
-        if self.expanded and self.pet.selected:
+        if self.expanded and (self.pet.selected or self.soul.selected is not None):
             return "break"
         elif self.expanded and self.selected_object:
             self._activate_object(self.selected_object)
@@ -326,7 +340,7 @@ class PixelWorld(SceneCanvas):
             if self.hovered:
                 info += "  ·  点击互动"
         elif actor:
-            info = f"{actor['name']} · {actor['state_text']} · {actor['task']}"
+            info = f"{actor['name']} · {actor['state_text']} · {self.soul.status()}"
         else:
             info = (f"漫游工作室 · 点击物品互动 · 滚轮平移 / 1–{len(self.rooms)} 切换房间" if self.expanded else
                     "像素工作室 · 点击展开画卷")
@@ -346,6 +360,7 @@ class PixelWorld(SceneCanvas):
                 self.rect(left+width-cut, yy, cut, 2, self.edge_colors[1], "overlay")
         if self.expanded:
             self.pet.draw_panel(left, width)
+            self.soul.draw_panel(left, width)
 
     def _object_at(self, x, y):
         if self.members.hit(x, y, foreground_only=True):
@@ -367,6 +382,7 @@ class PixelWorld(SceneCanvas):
             return
         over_panel = self.pet.selected and self.pet._inside(self.canvasx(event.x), event.y,
                                                           getattr(self.pet, "panel_bounds", (0, 0, 0, 0)))
+        over_panel = over_panel or self.soul.panel_contains(self.canvasx(event.x), event.y)
         if over_panel:
             self.pet_hover = None
         self._hover(None if self.pet_hover or over_panel else self._object_at(self.canvasx(event.x), event.y))
@@ -399,6 +415,9 @@ class PixelWorld(SceneCanvas):
             return
         x, y = self.canvasx(event.x), event.y
         self._hold_camera()
+        if self.soul.panel_click(x, y):
+            self._live()
+            return
         if self.pet.panel_click(x, y):
             self._live()
             return
@@ -412,6 +431,7 @@ class PixelWorld(SceneCanvas):
         pet = self.pet.hit(x, y)
         if pet:
             self.members.selected = self.selected_object = self.hovered = None
+            self.soul.dismiss()
             self.pet.activate(pet)
             self._live()
             return
@@ -421,12 +441,14 @@ class PixelWorld(SceneCanvas):
         member = self.members.hit(x, y, foreground_only=True) or (None if foreground else self.members.hit(x, y))
         if member:
             self.members.selected, self.selected_object, self.hovered = member, None, None
+            self.soul.open(member)
             if self.on_select:
                 self.on_select(self.members.actors[member])
         else:
             key = self._object_at(x, y)
             self.selected_object = key
             self.members.selected = None
+            self.soul.dismiss()
             if key:
                 self._activate_object(key)
         self._live()
@@ -440,4 +462,5 @@ class PixelWorld(SceneCanvas):
         if self._render_timer is not None:
             self.after_cancel(self._render_timer)
             self._render_timer = None
+        self.soul.close()
         self.pet.close()
